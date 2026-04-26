@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: verify go.mod / go.sum are tidy
+        run: go mod tidy -diff
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -count=1 ./...
+
+      - name: build
+        run: go build ./...
