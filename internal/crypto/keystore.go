@@ -4,7 +4,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"errors"
+	"io"
 	"sync"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 // VerifierLabel is the constant string MAC'd under the KEK to produce a
@@ -96,6 +99,34 @@ func (k *Keystore) With(fn func(kek []byte) error) error {
 		return ErrLocked
 	}
 	return fn(k.kek)
+}
+
+// SessionSecretLabel is the HKDF info string for the session-cookie HMAC
+// secret. Versioned so future changes to the cookie format can rotate it
+// without colliding with stored sessions.
+const SessionSecretLabel = "homepki/session-cookie/v1"
+
+// SessionSecretLen is the length of the derived session HMAC secret.
+const SessionSecretLen = 32
+
+// DeriveSessionSecret returns a 32-byte HMAC key derived from the KEK via
+// HKDF-SHA256. The derivation is deterministic per KEK, so the same KEK
+// always yields the same secret — an unlock with the correct passphrase
+// after a process restart re-derives the same session secret and existing
+// session cookies remain valid. A passphrase rotation changes the KEK and
+// therefore invalidates all sessions (per STORAGE.md §6).
+//
+// The caller owns the returned slice and is responsible for zeroing it
+// when no longer needed. Returns ErrLocked if the keystore is locked.
+func (k *Keystore) DeriveSessionSecret() ([]byte, error) {
+	var out []byte
+	err := k.With(func(kek []byte) error {
+		h := hkdf.New(sha256.New, kek, nil, []byte(SessionSecretLabel))
+		out = make([]byte, SessionSecretLen)
+		_, err := io.ReadFull(h, out)
+		return err
+	})
+	return out, err
 }
 
 // zero overwrites b with zeros. The compiler currently does not optimize

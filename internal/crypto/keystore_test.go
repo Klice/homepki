@@ -180,3 +180,62 @@ func TestVerifierEqual(t *testing.T) {
 		t.Error("differing bytes should not compare equal")
 	}
 }
+
+func TestDeriveSessionSecret_DeterministicPerKEK(t *testing.T) {
+	k := NewKeystore()
+	kek := bytes.Repeat([]byte{0x42}, KeyLen)
+	if err := k.Install(append([]byte(nil), kek...)); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := k.DeriveSessionSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := k.DeriveSessionSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Error("DeriveSessionSecret is not deterministic for the same KEK")
+	}
+	if len(a) != SessionSecretLen {
+		t.Errorf("len: got %d, want %d", len(a), SessionSecretLen)
+	}
+	// The session secret must not equal the KEK itself.
+	if bytes.Equal(a, kek) {
+		t.Error("session secret equals the KEK — HKDF derivation is broken")
+	}
+}
+
+func TestDeriveSessionSecret_DifferentKEKDifferentSecret(t *testing.T) {
+	k := NewKeystore()
+
+	if err := k.Install(bytes.Repeat([]byte{0xAA}, KeyLen)); err != nil {
+		t.Fatal(err)
+	}
+	a, err := k.DeriveSessionSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := k.Install(bytes.Repeat([]byte{0xBB}, KeyLen)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := k.DeriveSessionSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Equal(a, b) {
+		t.Error("different KEKs produced identical session secrets")
+	}
+}
+
+func TestDeriveSessionSecret_LockedReturnsErrLocked(t *testing.T) {
+	k := NewKeystore()
+	_, err := k.DeriveSessionSecret()
+	if !errors.Is(err, ErrLocked) {
+		t.Errorf("got %v, want ErrLocked", err)
+	}
+}
