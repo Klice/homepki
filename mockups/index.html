@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>homepki</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    /* Lighter pico defaults */
+    :root {
+      --pico-font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --pico-font-family-monospace: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --pico-font-size: 95%;
+      --pico-font-weight: 400;
+      --pico-line-height: 1.4;
+      --pico-spacing: 0.6rem;
+      --pico-block-spacing-vertical: 0.75rem;
+      --pico-block-spacing-horizontal: 0.75rem;
+      --pico-form-element-spacing-vertical: 0.4rem;
+      --pico-form-element-spacing-horizontal: 0.6rem;
+      --pico-border-radius: 4px;
+      --pico-card-box-shadow: none;
+    }
+    body { max-width: 1280px; margin-inline: auto; padding-inline: 1rem; }
+    h1, h2, h3 { font-weight: 500; }
+
+    /* Header */
+    header.app { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; padding-block:0.75rem; border-bottom:1px solid var(--pico-muted-border-color); margin-bottom:1rem; }
+    header.app .brand { font-weight:600; font-size:1rem; }
+    header.app .brand small { color:var(--pico-muted-color); font-weight:400; margin-left:0.5rem; }
+    header.app nav ul { display:flex; gap:0.9rem; align-items:center; margin:0; padding:0; list-style:none; }
+    header.app nav a, header.app nav button { font-size:0.88rem; padding:0.3rem 0.7rem; margin:0; }
+    header.app nav button { line-height:1.2; }
+
+    /* Toolbar */
+    .toolbar { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:0.75rem; }
+    .toolbar .summary { color:var(--pico-muted-color); font-size:0.85rem; margin-right:auto; }
+    .toolbar .summary b { color:var(--pico-color); font-weight:500; }
+    .toolbar input[type="search"], .toolbar select { margin:0; height:2rem; font-size:0.85rem; }
+    .toolbar input[type="search"] { width:18rem; }
+
+    /* Section heads */
+    .section-head { display:flex; align-items:baseline; justify-content:space-between; margin: 1.25rem 0 0.4rem; }
+    .section-head h2 { margin:0; font-size:0.95rem; font-weight:500; }
+    .section-head h2 small { color:var(--pico-muted-color); font-weight:400; margin-left:0.4rem; }
+    .section-head .actions a { font-size:0.83rem; margin-left:0.75rem; text-decoration:none; }
+    .section-head .actions a:hover { text-decoration:underline; }
+
+    /* Pills */
+    .pill { display:inline-block; padding:0.05rem 0.45rem; border-radius:3px; font-size:0.7rem; font-weight:500; line-height:1.5; vertical-align:1px; letter-spacing:0.02em; }
+    .pill-ok    { background:#e6f4ea; color:#1e7a3c; }
+    .pill-warn  { background:#fdf3d8; color:#8a6300; }
+    .pill-bad   { background:#fce8e6; color:#a8261a; }
+    .pill-muted { background:#eceff2; color:#5b6470; }
+
+    .type { font-size:0.7rem; color:var(--pico-muted-color); text-transform:uppercase; letter-spacing:0.05em; }
+    .meta { color:var(--pico-muted-color); font-size:0.78rem; font-family:var(--pico-font-family-monospace); }
+    .exp-bad strong  { color:#a8261a; }
+    .exp-warn strong { color:#8a6300; }
+
+    /* Tables */
+    table.flat { width:100%; border-collapse:collapse; font-size:0.85rem; background:#fff; border:1px solid var(--pico-muted-border-color); border-radius:4px; }
+    table.flat th { font-weight:500; color:var(--pico-muted-color); text-align:left; padding:0.45rem 0.6rem; border-bottom:1px solid var(--pico-muted-border-color); white-space:nowrap; background:#fafbfc; }
+    table.flat td { padding:0.45rem 0.6rem; border-bottom:1px solid var(--pico-muted-border-color); vertical-align:top; }
+    table.flat tr:last-child td { border-bottom:none; }
+    table.flat tr:hover td { background:#fafbfc; }
+    table.flat td.cn { font-weight:500; }
+    table.flat td.cn a { text-decoration:none; }
+    table.flat td.cn a:hover { text-decoration:underline; }
+    table.flat td .meta { display:block; }
+    table.flat td.num, table.flat td.expires { font-variant-numeric:tabular-nums; white-space:nowrap; }
+    table.flat td.actions { text-align:right; white-space:nowrap; }
+    table.flat td.actions a { font-size:0.8rem; margin-left:0.4rem; text-decoration:none; }
+    table.flat td.actions a:hover { text-decoration:underline; }
+    table.flat td.actions .sep { color:#d0d4d8; margin:0 0.15rem 0 0.55rem; user-select:none; }
+
+    .empty { padding: 1rem; text-align:center; color:var(--pico-muted-color); font-size:0.85rem; background:#fff; border:1px dashed var(--pico-muted-border-color); border-radius:4px; }
+
+    /* Deploy column */
+    td.deploy { font-family:var(--pico-font-family-monospace); font-size:0.78rem; }
+    td.deploy .target { display:block; line-height:1.3; }
+    td.deploy .target + .target { margin-top:0.15rem; }
+    td.deploy .when { color:var(--pico-muted-color); }
+    td.deploy .none { font-family:var(--pico-font-family); color:var(--pico-muted-color); }
+    td.deploy .stale { color:#8a6300; }
+    td.deploy .fail { color:#a8261a; }
+    .hidden { display:none !important; }
+
+    footer.app { margin:1.5rem 0 1rem; color:var(--pico-muted-color); font-size:0.8rem; }
+  </style>
+</head>
+<body>
+
+<header class="app">
+  <div>
+    <span class="brand">homepki <small>private PKI</small></span>
+  </div>
+  <nav>
+    <ul>
+      <li><span class="pill pill-ok">unlocked</span></li>
+      <li><a href="#">Issue root</a></li>
+      <li><a href="#">Issue intermediate</a></li>
+      <li><a href="#">Issue leaf</a></li>
+      <li>
+        <form method="post" action="#" style="margin:0;">
+          <button type="submit" class="secondary outline">Lock</button>
+        </form>
+      </li>
+    </ul>
+  </nav>
+</header>
+
+<div class="toolbar">
+  <div class="summary">
+    <b>14</b> active &middot; <b>3</b> expiring &middot; <b>1</b> expired &middot; <b>2</b> revoked &middot; CRL base <code>https://certs.lan/crl/</code>
+  </div>
+  <input type="search" id="filter-q" placeholder="Filter by CN, SAN, serial, fingerprint…">
+  <select id="filter-status">
+    <option value="all">All statuses</option>
+    <option value="active">Active</option>
+    <option value="expiring">Expiring ≤30d</option>
+    <option value="expired">Expired</option>
+    <option value="revoked">Revoked</option>
+    <option value="superseded">Superseded</option>
+  </select>
+</div>
+
+<!-- ============ CAs (roots + intermediates) ============ -->
+<div class="section-head">
+  <h2>Authorities <small>roots and intermediates</small></h2>
+  <div class="actions">
+    <a href="#">+ Issue root</a>
+    <a href="#">+ Issue intermediate</a>
+  </div>
+</div>
+
+<table class="flat" id="cas">
+  <thead><tr>
+    <th style="width:18rem;">Subject</th>
+    <th>Type</th>
+    <th>Key</th>
+    <th>Issuer</th>
+    <th>Serial</th>
+    <th>Expires</th>
+    <th>Status</th>
+    <th></th>
+  </tr></thead>
+  <tbody>
+    <tr data-status="active" data-search="lan root ca rsa 4096 8a:2c:11:fe:b1">
+      <td class="cn"><a href="#">LAN Root CA</a><span class="meta">SHA-256 8a:2c:11:fe:…:b1</span></td>
+      <td><span class="type">root</span></td>
+      <td>RSA 4096</td>
+      <td><span class="meta">— self —</span></td>
+      <td class="num">01</td>
+      <td class="expires">2034-04-26 <span class="meta">in 8y</span></td>
+      <td><span class="pill pill-ok">active</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">crl</a><span class="sep">|</span><a href="#">rotate</a></td>
+    </tr>
+    <tr data-status="expiring" data-search="lan issuing ca g1 ecdsa p-384 3f:a1:0c">
+      <td class="cn"><a href="#">LAN Issuing CA G1</a><span class="meta">6 leaves issued</span></td>
+      <td><span class="type">intermediate</span></td>
+      <td>ECDSA P-384</td>
+      <td>LAN Root CA</td>
+      <td class="num">3f:a1:0c</td>
+      <td class="expires exp-warn"><strong>2026-05-23</strong> <span class="meta">in 27d</span></td>
+      <td><span class="pill pill-warn">expiring</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">chain.pem</a><a href="#">crl</a><span class="sep">|</span><a href="#">rotate</a></td>
+    </tr>
+    <tr data-status="superseded" data-search="lan root ca legacy rsa 2048">
+      <td class="cn"><a href="#">LAN Root CA (legacy)</a><span class="meta">replaced by LAN Root CA</span></td>
+      <td><span class="type">root</span></td>
+      <td>RSA 2048</td>
+      <td><span class="meta">— self —</span></td>
+      <td class="num">01</td>
+      <td class="expires">2027-01-02 <span class="meta">in 8mo</span></td>
+      <td><span class="pill pill-muted">superseded</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">crl</a></td>
+    </tr>
+    <tr data-status="superseded" data-search="lan issuing ca legacy rsa 2048 02">
+      <td class="cn"><a href="#">LAN Issuing CA (legacy)</a><span class="meta">1 leaf issued</span></td>
+      <td><span class="type">intermediate</span></td>
+      <td>RSA 2048</td>
+      <td>LAN Root CA (legacy)</td>
+      <td class="num">02</td>
+      <td class="expires">2026-12-30 <span class="meta">in 8mo</span></td>
+      <td><span class="pill pill-muted">superseded</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">chain.pem</a><a href="#">crl</a></td>
+    </tr>
+  </tbody>
+</table>
+<div id="cas-empty" class="empty hidden">No authorities match your filter.</div>
+
+<!-- ============ Leaves ============ -->
+<div class="section-head">
+  <h2>Leaf certificates <small>10 issued</small></h2>
+  <div class="actions">
+    <a href="#">+ Issue leaf</a>
+  </div>
+</div>
+
+<table class="flat" id="leaves">
+  <thead><tr>
+    <th style="width:16rem;">Subject / SANs</th>
+    <th>Key</th>
+    <th>Issuer</th>
+    <th>Expires</th>
+    <th>Deploy</th>
+    <th>Status</th>
+    <th></th>
+  </tr></thead>
+  <tbody>
+    <tr data-status="expired" data-search="grafana.lan 10.0.0.42 ecdsa p-256 4f:1a:bc nginx">
+      <td class="cn"><a href="#">grafana.lan</a><span class="meta">grafana.lan, 10.0.0.42 · 4f:1a:bc</span></td>
+      <td>ECDSA P-256</td>
+      <td>LAN Issuing CA G1</td>
+      <td class="expires exp-bad"><strong>2026-04-22</strong> <span class="meta">expired 4d ago</span></td>
+      <td class="deploy">
+        <span class="target">/etc/nginx/ssl/grafana.{crt,key}<br><span class="when">nginx · ok 4d ago</span></span>
+      </td>
+      <td><span class="pill pill-bad">expired</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">fullchain.pem</a><a href="#">p12</a><span class="sep">|</span><a href="#">deploy</a><a href="#">rotate</a></td>
+    </tr>
+    <tr data-status="expiring" data-search="prometheus.lan ecdsa p-256 6a:de:21 nginx">
+      <td class="cn"><a href="#">prometheus.lan</a><span class="meta">prometheus.lan · 6a:de:21</span></td>
+      <td>ECDSA P-256</td>
+      <td>LAN Issuing CA G1</td>
+      <td class="expires exp-warn"><strong>2026-05-02</strong> <span class="meta">in 6d</span></td>
+      <td class="deploy">
+        <span class="target">/etc/nginx/ssl/prometheus.{crt,key}<br><span class="when">nginx · ok 12d ago</span></span>
+      </td>
+      <td><span class="pill pill-warn">expiring</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">fullchain.pem</a><a href="#">p12</a><span class="sep">|</span><a href="#">deploy</a><a href="#">rotate</a></td>
+    </tr>
+    <tr data-status="expiring" data-search="vault.lan vault-ui.lan ecdsa p-256 71:c0:09">
+      <td class="cn"><a href="#">vault.lan</a><span class="meta">vault.lan, vault-ui.lan · 71:c0:09</span></td>
+      <td>ECDSA P-256</td>
+      <td>LAN Issuing CA G1</td>
+      <td class="expires exp-warn"><strong>2026-05-14</strong> <span class="meta">in 18d</span></td>
+      <td class="deploy">
+        <span class="target">/opt/vault/tls/vault.{crt,key}<br><span class="when stale">vault · stale: rotated 2d ago, not redeployed</span></span>
+      </td>
+      <td><span class="pill pill-warn">expiring</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">fullchain.pem</a><a href="#">p12</a><span class="sep">|</span><a href="#">deploy</a><a href="#">rotate</a></td>
+    </tr>
+    <tr data-status="active" data-search="git.lan ecdsa p-256 8b:33:7e caddy">
+      <td class="cn"><a href="#">git.lan</a><span class="meta">git.lan · 8b:33:7e</span></td>
+      <td>ECDSA P-256</td>
+      <td>LAN Issuing CA G1</td>
+      <td class="expires">2026-09-12 <span class="meta">in 4mo</span></td>
+      <td class="deploy">
+        <span class="target">/etc/caddy/certs/git.{crt,key}<br><span class="when">caddy · ok 3h ago</span></span>
+        <span class="target">/srv/backups/tls/git-$DATE.tar<br><span class="when">backup · ok 3h ago</span></span>
+      </td>
+      <td><span class="pill pill-ok">active</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">fullchain.pem</a><a href="#">p12</a><span class="sep">|</span><a href="#">deploy</a><a href="#">rotate</a></td>
+    </tr>
+    <tr data-status="active" data-search="registry.lan oci.lan ecdsa p-256 9d:14:42">
+      <td class="cn"><a href="#">registry.lan</a><span class="meta">registry.lan, oci.lan · 9d:14:42</span></td>
+      <td>ECDSA P-256</td>
+      <td>LAN Issuing CA G1</td>
+      <td class="expires">2026-10-03 <span class="meta">in 5mo</span></td>
+      <td class="deploy"><span class="none">— no targets configured</span></td>
+      <td><span class="pill pill-ok">active</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">fullchain.pem</a><a href="#">p12</a><span class="sep">|</span><a href="#">configure deploy</a><a href="#">rotate</a></td>
+    </tr>
+    <tr data-status="active" data-search="ldap.lan ecdsa p-256 b2:71:30 nginx haproxy">
+      <td class="cn"><a href="#">ldap.lan</a><span class="meta">ldap.lan · b2:71:30</span></td>
+      <td>ECDSA P-256</td>
+      <td>LAN Issuing CA G1</td>
+      <td class="expires">2026-08-19 <span class="meta">in 4mo</span></td>
+      <td class="deploy">
+        <span class="target">/etc/nginx/ssl/ldap.{crt,key}<br><span class="when">nginx · ok 1h ago</span></span>
+        <span class="target">/etc/haproxy/certs/ldap.pem<br><span class="when fail">haproxy · failed 1h ago — permission denied</span></span>
+      </td>
+      <td><span class="pill pill-ok">active</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">fullchain.pem</a><a href="#">p12</a><span class="sep">|</span><a href="#">deploy</a><a href="#">rotate</a></td>
+    </tr>
+    <tr data-status="revoked" data-search="old-wiki.lan ecdsa p-256 a1:7b:55">
+      <td class="cn"><a href="#">old-wiki.lan</a><span class="meta">old-wiki.lan · a1:7b:55 · revoked 2026-03-11</span></td>
+      <td>ECDSA P-256</td>
+      <td>LAN Issuing CA G1</td>
+      <td class="expires">2026-12-30 <span class="meta">in 8mo</span></td>
+      <td class="deploy"><span class="none">—</span></td>
+      <td><span class="pill pill-muted">revoked</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">fullchain.pem</a><a href="#">p12</a></td>
+    </tr>
+    <tr data-status="superseded" data-search="jenkins.lan ci.lan rsa 2048 12:0a:c1">
+      <td class="cn"><a href="#">jenkins.lan</a><span class="meta">jenkins.lan, ci.lan · 12:0a:c1</span></td>
+      <td>RSA 2048</td>
+      <td>LAN Issuing CA (legacy)</td>
+      <td class="expires">2026-11-04 <span class="meta">in 6mo</span></td>
+      <td class="deploy"><span class="none">—</span></td>
+      <td><span class="pill pill-muted">superseded</span></td>
+      <td class="actions"><a href="#">view</a><span class="sep">|</span><a href="#">cert.pem</a><a href="#">key.pem</a><a href="#">fullchain.pem</a><a href="#">p12</a></td>
+    </tr>
+  </tbody>
+</table>
+<div id="leaves-empty" class="empty hidden">No leaf certificates match your filter.</div>
+
+<footer class="app">
+  homepki &middot; v0.1-mockup &middot; <a href="#">healthz</a>
+</footer>
+
+<script>
+  const q = document.getElementById('filter-q');
+  const st = document.getElementById('filter-status');
+
+  function apply() {
+    const needle = q.value.trim().toLowerCase();
+    const status = st.value;
+    ['cas', 'leaves'].forEach(id => {
+      const tbody = document.querySelector(`#${id} tbody`);
+      let visible = 0;
+      tbody.querySelectorAll('tr').forEach(tr => {
+        const matchStatus = (status === 'all' || tr.dataset.status === status);
+        const matchQ = (!needle || tr.dataset.search.includes(needle));
+        const show = matchStatus && matchQ;
+        tr.classList.toggle('hidden', !show);
+        if (show) visible++;
+      });
+      document.getElementById(`${id}-empty`).classList.toggle('hidden', visible > 0);
+      document.getElementById(id).classList.toggle('hidden', visible === 0);
+    });
+  }
+
+  q.addEventListener('input', apply);
+  st.addEventListener('change', apply);
+</script>
+
+</body>
+</html>

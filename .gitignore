@@ -1,0 +1,39 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Go (forward-compat; no source yet)
+/bin/
+/dist/
+/vendor/
+*.exe
+*.test
+*.out
+coverage.*
+tmp/
+
+# Local environment
+.env
+.env.*
+
+# PKI material — never commit
+*.pem
+*.key
+*.p12
+*.pfx
+*.der
+*.crt
+*.csr
+*.crl
+*.jks
+
+# SQLite working files
+*.db
+*.db-wal
+*.db-shm

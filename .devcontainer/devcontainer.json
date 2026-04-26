@@ -1,0 +1,66 @@
+{
+  "name": "cert-manager",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": true,
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+  "forwardPorts": [8080, 8443],
+  "portsAttributes": {
+    "8080": {
+      "label": "cert-manager UI",
+      "onAutoForward": "notify"
+    },
+    "8443": {
+      "label": "nginx (e2e)",
+      "onAutoForward": "silent"
+    }
+  },
+  "containerEnv": {
+    "CGO_ENABLED": "0",
+    "CM_DATA_DIR": "/workspaces/cert-manager/.devdata",
+    "CM_LISTEN_ADDR": ":8080",
+    "CM_LOG_FORMAT": "text",
+    "CRL_BASE_URL": "http://localhost:8080"
+  },
+  "mounts": [
+    "source=cert-manager-gomodcache,target=/go/pkg/mod,type=volume",
+    "source=cert-manager-gobuildcache,target=/home/vscode/.cache/go-build,type=volume",
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached,readonly"
+  ],
+  "postCreateCommand": "sudo chown -R vscode:vscode /go /home/vscode/.cache/go-build && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go install github.com/air-verse/air@latest",
+  "postStartCommand": "test -f go.mod && go mod download || true",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "golang.go",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "yzhang.markdown-all-in-one",
+        "otovo-oss.htmx-tags"
+      ],
+      "settings": {
+        "go.useLanguageServer": true,
+        "go.lintTool": "golangci-lint",
+        "go.lintOnSave": "package",
+        "go.formatTool": "goimports",
+        "go.toolsManagement.autoUpdate": true,
+        "[go]": {
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        },
+        "files.eol": "\n"
+      }
+    }
+  },
+  "remoteUser": "vscode"
+}
