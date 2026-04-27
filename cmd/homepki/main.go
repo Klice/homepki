@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Klice/homepki/internal/config"
+	"github.com/Klice/homepki/internal/crypto"
 	"github.com/Klice/homepki/internal/store"
 	"github.com/Klice/homepki/internal/web"
 )
@@ -41,7 +45,18 @@ func run() error {
 		return err
 	}
 
-	handler, err := web.New(cfg, db)
+	keystore := crypto.NewKeystore()
+
+	// Optional unattended unlock from env (LIFECYCLE.md §1.5). Only attempted
+	// when the app is already set up — first-run setup must still go through
+	// the UI so the operator confirms the passphrase choice deliberately.
+	if cfg.Passphrase != "" {
+		if err := tryAutoUnlock(db, keystore, cfg.Passphrase); err != nil {
+			return fmt.Errorf("auto-unlock from CM_PASSPHRASE: %w", err)
+		}
+	}
+
+	handler, err := web.New(cfg, db, keystore)
 	if err != nil {
 		return err
 	}
@@ -75,6 +90,47 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return err
 	}
+	return nil
+}
+
+// tryAutoUnlock loads the salt + KDF params + verifier from settings and
+// attempts to install a KEK derived from passphrase. Returns nil (and logs
+// a warning) when the app isn't yet set up — that's not an error, the
+// operator just hasn't done first-run setup yet.
+func tryAutoUnlock(db *sql.DB, keystore *crypto.Keystore, passphrase string) error {
+	setUp, err := store.IsSetUp(db)
+	if err != nil {
+		return err
+	}
+	if !setUp {
+		slog.Warn("CM_PASSPHRASE set but app is not yet set up; skipping auto-unlock")
+		return nil
+	}
+	salt, err := store.GetSetting(db, store.SettingKDFSalt)
+	if err != nil {
+		return err
+	}
+	paramsJSON, err := store.GetSetting(db, store.SettingKDFParams)
+	if err != nil {
+		return err
+	}
+	verifier, err := store.GetSetting(db, store.SettingPassphraseVerifier)
+	if err != nil {
+		return err
+	}
+	var params crypto.KDFParams
+	if err := json.Unmarshal(paramsJSON, &params); err != nil {
+		return err
+	}
+	kek, err := crypto.DeriveAndVerify([]byte(passphrase), salt, params, verifier)
+	if err != nil {
+		return err
+	}
+	if err := keystore.Install(kek); err != nil {
+		crypto.Zero(kek)
+		return err
+	}
+	slog.Info("auto-unlocked from CM_PASSPHRASE")
 	return nil
 }
 
