@@ -14,7 +14,10 @@ import (
 
 func TestHandleHealthz_OK(t *testing.T) {
 	db := openInMemoryDB(t)
-	srv := New(config.Config{}, db)
+	srv, err := New(config.Config{}, db)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -37,7 +40,10 @@ func TestHandleHealthz_DBUnreachable(t *testing.T) {
 	// sql.ErrConnDone, which is exactly the "db unavailable" path.
 	_ = db.Close()
 
-	srv := New(config.Config{}, db)
+	srv, err := New(config.Config{}, db)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()

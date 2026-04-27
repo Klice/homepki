@@ -41,9 +41,13 @@ func run() error {
 		return err
 	}
 
+	handler, err := web.New(cfg, db)
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           web.New(cfg, db),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
