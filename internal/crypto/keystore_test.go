@@ -239,3 +239,61 @@ func TestDeriveSessionSecret_LockedReturnsErrLocked(t *testing.T) {
 		t.Errorf("got %v, want ErrLocked", err)
 	}
 }
+
+func TestZero(t *testing.T) {
+	b := bytes.Repeat([]byte{0xAA}, 16)
+	Zero(b)
+	for i, v := range b {
+		if v != 0 {
+			t.Errorf("byte %d not zeroed: 0x%02X", i, v)
+		}
+	}
+}
+
+func TestDeriveAndVerify_RoundTrip(t *testing.T) {
+	salt := []byte("0123456789abcdef")
+	pw := []byte("correct horse battery staple")
+	p := fastKDFParams()
+
+	kek, err := DeriveKEK(pw, salt, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := Verifier(kek)
+	Zero(kek)
+
+	got, err := DeriveAndVerify(pw, salt, p, verifier)
+	if err != nil {
+		t.Fatalf("DeriveAndVerify: %v", err)
+	}
+	if len(got) != int(p.KeyLen) {
+		t.Errorf("got len %d, want %d", len(got), p.KeyLen)
+	}
+}
+
+func TestDeriveAndVerify_WrongPassphrase(t *testing.T) {
+	salt := []byte("0123456789abcdef")
+	p := fastKDFParams()
+
+	kek, err := DeriveKEK([]byte("right"), salt, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := Verifier(kek)
+
+	_, err = DeriveAndVerify([]byte("wrong"), salt, p, verifier)
+	if !errors.Is(err, ErrPassphraseMismatch) {
+		t.Errorf("got %v, want ErrPassphraseMismatch", err)
+	}
+}
+
+func TestDeriveAndVerify_PropagatesDeriveErrors(t *testing.T) {
+	// Empty passphrase fails inside DeriveKEK before any verifier check.
+	_, err := DeriveAndVerify(nil, []byte("salt"), fastKDFParams(), []byte("verifier"))
+	if err == nil {
+		t.Error("expected error from empty passphrase")
+	}
+	if errors.Is(err, ErrPassphraseMismatch) {
+		t.Error("derive error should not be reported as ErrPassphraseMismatch")
+	}
+}

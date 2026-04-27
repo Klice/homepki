@@ -35,6 +35,29 @@ func VerifierEqual(a, b []byte) bool {
 // and the requested operation needs the KEK.
 var ErrLocked = errors.New("keystore is locked")
 
+// ErrPassphraseMismatch is returned by DeriveAndVerify when the candidate
+// KEK derived from the supplied passphrase does not match the stored
+// verifier. Distinct from input-validation errors so callers can distinguish
+// "wrong passphrase" (a normal failure to display to the user) from
+// programmer errors.
+var ErrPassphraseMismatch = errors.New("passphrase does not match stored verifier")
+
+// DeriveAndVerify is the unlock primitive: it derives a KEK from the supplied
+// passphrase + salt + params, then checks that the resulting verifier matches
+// the stored one. On match the KEK is returned (caller owns it). On mismatch
+// the candidate KEK is zeroed and ErrPassphraseMismatch is returned.
+func DeriveAndVerify(passphrase, salt []byte, p KDFParams, expectedVerifier []byte) ([]byte, error) {
+	kek, err := DeriveKEK(passphrase, salt, p)
+	if err != nil {
+		return nil, err
+	}
+	if !VerifierEqual(Verifier(kek), expectedVerifier) {
+		Zero(kek)
+		return nil, ErrPassphraseMismatch
+	}
+	return kek, nil
+}
+
 // Keystore holds the in-memory KEK and exposes a small lock/unlock state
 // machine. Methods are safe for concurrent use. The KEK byte slice is
 // zeroed on Lock and on replacement via Install, so it is never resident
@@ -63,7 +86,7 @@ func (k *Keystore) Install(kek []byte) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if k.kek != nil {
-		zero(k.kek)
+		Zero(k.kek)
 	}
 	k.kek = kek
 	return nil
@@ -74,7 +97,7 @@ func (k *Keystore) Lock() {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if k.kek != nil {
-		zero(k.kek)
+		Zero(k.kek)
 		k.kek = nil
 	}
 }
@@ -129,10 +152,9 @@ func (k *Keystore) DeriveSessionSecret() ([]byte, error) {
 	return out, err
 }
 
-// zero overwrites b with zeros. The compiler currently does not optimize
-// this away because b is touched after the loop (the slice header is
-// nilled by the caller).
-func zero(b []byte) {
+// Zero overwrites b with zeros in place. Use after a derived KEK / DEK /
+// HKDF subkey is no longer needed so it doesn't sit in memory.
+func Zero(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}
