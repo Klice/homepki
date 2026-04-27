@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -190,6 +191,84 @@ func GetCert(db *sql.DB, id string) (*Cert, error) {
 		return nil, fmt.Errorf("GetCert: unmarshal ext_key_usage: %w", err)
 	}
 	return &c, nil
+}
+
+// ListCAs returns every root_ca and intermediate_ca row, newest first.
+func ListCAs(db *sql.DB) ([]*Cert, error) {
+	return listByTypes(db, []string{"root_ca", "intermediate_ca"})
+}
+
+// ListLeaves returns every leaf row, newest first.
+func ListLeaves(db *sql.DB) ([]*Cert, error) {
+	return listByTypes(db, []string{"leaf"})
+}
+
+// GetChain returns the cert and all its ancestors up to the self-signed
+// root, in self-first order ([self, parent, ..., root]). Returns
+// ErrCertNotFound if id does not exist. Cycle-safe: stops if a cert is
+// ever revisited (the FK shouldn't allow cycles, but the loop is
+// defensive).
+func GetChain(db *sql.DB, id string) ([]*Cert, error) {
+	chain := []*Cert{}
+	seen := map[string]bool{}
+	current := id
+	for current != "" {
+		if seen[current] {
+			break
+		}
+		seen[current] = true
+		c, err := GetCert(db, current)
+		if err != nil {
+			return nil, err
+		}
+		chain = append(chain, c)
+		if c.ParentID == nil {
+			break
+		}
+		current = *c.ParentID
+	}
+	return chain, nil
+}
+
+func listByTypes(db *sql.DB, types []string) ([]*Cert, error) {
+	if len(types) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(types))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(types))
+	for i, t := range types {
+		args[i] = t
+	}
+	rows, err := db.Query(`
+		SELECT id FROM certificates
+		WHERE type IN (`+placeholders+`)
+		ORDER BY created_at DESC, id DESC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listByTypes: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]*Cert, 0, len(ids))
+	for _, id := range ids {
+		c, err := GetCert(db, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 // GetCertKey loads the cert_keys row for id. Returns ErrCertNotFound if
