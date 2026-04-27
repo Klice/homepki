@@ -2,9 +2,11 @@ package web
 
 import (
 	"database/sql"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -35,12 +37,19 @@ func testServer(t *testing.T) (*Server, *sql.DB) {
 	return srv, db
 }
 
-// clientLite holds cookies between calls so a sequence of requests behaves
-// like a single browser session.
+// csrfFormFieldRE pulls the masked CSRF token value out of a rendered
+// form. gorilla/csrf rotates the masked value per render, so the test
+// client extracts it from each response body and uses it on the next POST.
+var csrfFormFieldRE = regexp.MustCompile(`name="` + csrfFormField + `"\s+value="([^"]+)"`)
+
+// clientLite holds cookies and the most-recently-rendered CSRF token
+// between calls so a sequence of requests behaves like a single browser
+// session.
 type clientLite struct {
-	t       *testing.T
-	srv     http.Handler
-	cookies map[string]*http.Cookie
+	t        *testing.T
+	srv      http.Handler
+	cookies  map[string]*http.Cookie
+	csrfTok  string // most recent token extracted from a rendered form
 }
 
 func newClient(t *testing.T, srv http.Handler) *clientLite {
@@ -52,6 +61,13 @@ func (c *clientLite) do(req *http.Request) *httptest.ResponseRecorder {
 	for _, ck := range c.cookies {
 		req.AddCookie(ck)
 	}
+	// gorilla/csrf treats unmarked requests as HTTPS by default and rejects
+	// state-changing requests with no Referer. Set a same-origin Referer so
+	// the test client looks like a normal browser navigating from the same
+	// app.
+	if req.Header.Get("Referer") == "" {
+		req.Header.Set("Referer", "https://example.com/")
+	}
 	w := httptest.NewRecorder()
 	c.srv.ServeHTTP(w, req)
 	for _, ck := range w.Result().Cookies() {
@@ -60,6 +76,11 @@ func (c *clientLite) do(req *http.Request) *httptest.ResponseRecorder {
 		} else {
 			c.cookies[ck.Name] = ck
 		}
+	}
+	if m := csrfFormFieldRE.FindStringSubmatch(w.Body.String()); m != nil {
+		// html/template escapes "+" -> "&#43;" inside attribute values; a
+		// browser would HTML-decode before submitting, so we do the same.
+		c.csrfTok = html.UnescapeString(m[1])
 	}
 	return w
 }
@@ -70,17 +91,10 @@ func (c *clientLite) get(target string) *httptest.ResponseRecorder {
 }
 
 func (c *clientLite) postForm(target string, form url.Values) *httptest.ResponseRecorder {
-	form.Set(csrfFormField, c.csrfToken())
+	form.Set(csrfFormField, c.csrfTok)
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return c.do(req)
-}
-
-func (c *clientLite) csrfToken() string {
-	if ck := c.cookies[csrfCookieName]; ck != nil {
-		return ck.Value
-	}
-	return ""
 }
 
 // validPassphrase is just long enough for MinPassphraseLen.
@@ -333,7 +347,10 @@ func TestLock_ZeroesKEKAndClearsSession(t *testing.T) {
 func TestLock_IsIdempotent(t *testing.T) {
 	srv, _ := testServer(t)
 	c := newClient(t, srv)
-	c.get("/unlock") // prime CSRF cookie (locked path is fine)
+	// GET something that renders a form so the client picks up a CSRF
+	// token. /unlock would 303 to /setup here (DB not yet initialized);
+	// /setup renders the first-run form which carries the token.
+	c.get("/setup")
 	w := c.postForm("/lock", url.Values{})
 	if w.Code != http.StatusSeeOther {
 		t.Errorf("first lock: got %d, want 303", w.Code)
