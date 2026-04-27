@@ -52,6 +52,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", staticHandler()))
 	s.mux.HandleFunc("GET /", s.handleIndex)
+	s.mux.HandleFunc("GET /certs/{id}", s.handleCertDetail)
 	s.mux.HandleFunc("GET /setup", s.handleSetupGet)
 	s.mux.HandleFunc("POST /setup", s.handleSetupPost)
 	s.mux.HandleFunc("GET /unlock", s.handleUnlockGet)

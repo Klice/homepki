@@ -1,0 +1,87 @@
+{{define "title"}}{{.View.SubjectCN}} — homepki{{end}}
+
+{{define "header_actions"}}
+<nav>
+  <ul>
+    <li><span class="pill pill-ok">unlocked</span></li>
+    <li><a href="/">← Back</a></li>
+    <li>
+      <form method="post" action="/lock" style="margin: 0;">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit" class="secondary outline">Lock</button>
+      </form>
+    </li>
+  </ul>
+</nav>
+{{end}}
+
+{{define "content"}}
+<article>
+  <header>
+    <h2 style="margin-bottom: 0.25rem;">{{.View.SubjectCN}}</h2>
+    <small>
+      {{.View.Type}}
+      &middot;
+      <span class="pill {{.View.StatusPillClass}}">{{.View.EffectiveStatus}}</span>
+    </small>
+  </header>
+
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Subject</h3>
+  <dl>
+    <dt>Common Name</dt><dd>{{.View.SubjectCN}}</dd>
+    {{if .View.SubjectO}}<dt>Organization</dt><dd>{{.View.SubjectO}}</dd>{{end}}
+    {{if .View.SubjectOU}}<dt>Org. Unit</dt><dd>{{.View.SubjectOU}}</dd>{{end}}
+    {{if .View.SubjectL}}<dt>Locality</dt><dd>{{.View.SubjectL}}</dd>{{end}}
+    {{if .View.SubjectST}}<dt>State</dt><dd>{{.View.SubjectST}}</dd>{{end}}
+    {{if .View.SubjectC}}<dt>Country</dt><dd>{{.View.SubjectC}}</dd>{{end}}
+  </dl>
+
+  {{if .View.SANsDisplay}}
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Subject alternative names</h3>
+  <p><code>{{.View.SANsDisplay}}</code></p>
+  {{end}}
+
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Issuer</h3>
+  <p>
+    {{if .IssuerID}}
+      <a href="/certs/{{.IssuerID}}">{{.IssuerCN}}</a>
+    {{else}}
+      <em>self-signed</em>
+    {{end}}
+  </p>
+
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Validity</h3>
+  <dl>
+    <dt>Not before</dt><dd>{{.View.NotBeforeDisplay}}</dd>
+    <dt>Not after</dt><dd>{{.View.NotAfterDisplay}} <small>({{.View.RelativeExpiry}})</small></dd>
+  </dl>
+
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Key</h3>
+  <dl>
+    <dt>Algorithm</dt><dd>{{.View.KeyDisplay}}</dd>
+  </dl>
+
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Identifiers</h3>
+  <dl>
+    <dt>Serial</dt><dd><code>{{.View.SerialNumber}}</code></dd>
+    <dt>SHA-256</dt><dd><code style="font-size: 0.78rem;">{{.FingerprintFmt}}</code></dd>
+  </dl>
+
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Chain</h3>
+  <ol>
+    {{range .Chain}}
+    <li>
+      {{if eq .ID $.View.ID}}
+        <strong>{{.SubjectCN}}</strong> <small>({{.Type}})</small>
+      {{else}}
+        <a href="/certs/{{.ID}}">{{.SubjectCN}}</a> <small>({{.Type}})</small>
+      {{end}}
+    </li>
+    {{end}}
+  </ol>
+
+  <p style="color: var(--pico-muted-color); font-size: 0.8rem;">
+    Downloads, rotation, revocation, and deploy actions land in upcoming releases.
+  </p>
+</article>
+{{end}}

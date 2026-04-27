@@ -15,7 +15,82 @@
 {{end}}
 
 {{define "content"}}
-<article>
-  <p>You are unlocked. Certificate management lands in a follow-up.</p>
-</article>
+<section style="margin-bottom: 1.25rem;">
+  <header style="display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 0.4rem;">
+    <h2 style="margin: 0; font-size: 0.95rem; font-weight: 500;">
+      Authorities <small>roots and intermediates</small>
+    </h2>
+  </header>
+
+  {{if .Authorities}}
+  <table>
+    <thead>
+      <tr>
+        <th>Subject</th>
+        <th>Type</th>
+        <th>Key</th>
+        <th>Issuer</th>
+        <th>Expires</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Authorities}}
+      <tr>
+        <td><a href="/certs/{{.ID}}">{{.SubjectCN}}</a></td>
+        <td>{{.Type}}</td>
+        <td>{{.KeyDisplay}}</td>
+        <td>{{.IssuerCN}}</td>
+        <td>{{.NotAfterDisplay}}<br><small>{{.RelativeExpiry}}</small></td>
+        <td><span class="pill {{.StatusPillClass}}">{{.EffectiveStatus}}</span></td>
+        <td><a href="/certs/{{.ID}}">view</a></td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p><small>No authorities yet. Issuance UI is coming in the next release.</small></p>
+  {{end}}
+</section>
+
+<section>
+  <header style="display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 0.4rem;">
+    <h2 style="margin: 0; font-size: 0.95rem; font-weight: 500;">
+      Leaf certificates <small>{{len .Leaves}} issued</small>
+    </h2>
+  </header>
+
+  {{if .Leaves}}
+  <table>
+    <thead>
+      <tr>
+        <th>Subject / SANs</th>
+        <th>Key</th>
+        <th>Issuer</th>
+        <th>Expires</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Leaves}}
+      <tr>
+        <td>
+          <a href="/certs/{{.ID}}">{{.SubjectCN}}</a>
+          {{if .SANsDisplay}}<br><small>{{.SANsDisplay}}</small>{{end}}
+        </td>
+        <td>{{.KeyDisplay}}</td>
+        <td>{{.IssuerCN}}</td>
+        <td>{{.NotAfterDisplay}}<br><small>{{.RelativeExpiry}}</small></td>
+        <td><span class="pill {{.StatusPillClass}}">{{.EffectiveStatus}}</span></td>
+        <td><a href="/certs/{{.ID}}">view</a></td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p><small>No leaf certificates yet.</small></p>
+  {{end}}
+</section>
 {{end}}
