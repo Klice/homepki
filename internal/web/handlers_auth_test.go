@@ -30,7 +30,7 @@ func testServer(t *testing.T) (*Server, *sql.DB) {
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	srv, err := New(config.Config{}, db, crypto.NewKeystore())
+	srv, err := New(config.Config{CRLBaseURL: "https://test.lan"}, db, crypto.NewKeystore())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

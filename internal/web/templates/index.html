@@ -4,6 +4,9 @@
 <nav>
   <ul>
     <li><span class="pill pill-ok">unlocked</span></li>
+    <li><a href="/certs/new/root">+ Root</a></li>
+    <li><a href="/certs/new/intermediate">+ Intermediate</a></li>
+    <li><a href="/certs/new/leaf">+ Leaf</a></li>
     <li>
       <form method="post" action="/lock" style="margin: 0;">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
