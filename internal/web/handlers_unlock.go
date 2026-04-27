@@ -50,6 +50,10 @@ func (s *Server) handleUnlockPost(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
+	if err := r.ParseForm(); err != nil {
+		internalServerError(w, "unlock-post: ParseForm", err)
+		return
+	}
 
 	pp := r.PostForm.Get("passphrase")
 	if pp == "" {
