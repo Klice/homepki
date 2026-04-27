@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Klice/homepki/internal/crypto"
+	"github.com/Klice/homepki/internal/store"
 )
 
 // internalServerError logs op + err under ERROR and writes a plain-text 500.
@@ -33,6 +34,27 @@ func hasValidSession(r *http.Request, ks *crypto.Keystore) bool {
 	}
 	defer crypto.Zero(secret)
 	return VerifySession(secret, c.Value) == nil
+}
+
+// requireUnlocked enforces the auth gate shared by every page that needs
+// the cert store. It 303-redirects to /setup when the app isn't configured,
+// or to /unlock when it is configured but locked / missing a valid session.
+// Returns true when the request should proceed.
+func (s *Server) requireUnlocked(w http.ResponseWriter, r *http.Request) bool {
+	setUp, err := store.IsSetUp(s.db)
+	if err != nil {
+		internalServerError(w, "auth-gate: IsSetUp", err)
+		return false
+	}
+	if !setUp {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return false
+	}
+	if !s.keystore.IsUnlocked() || !hasValidSession(r, s.keystore) {
+		http.Redirect(w, r, "/unlock", http.StatusSeeOther)
+		return false
+	}
+	return true
 }
 
 // issueSessionCookie derives the secret and sets a fresh session cookie on w.
