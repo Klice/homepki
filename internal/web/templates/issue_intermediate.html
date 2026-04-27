@@ -1,0 +1,88 @@
+{{define "title"}}homepki — issue intermediate CA{{end}}
+
+{{define "header_actions"}}
+<nav>
+  <ul>
+    <li><span class="pill pill-ok">unlocked</span></li>
+    <li><a href="/">← Back</a></li>
+  </ul>
+</nav>
+{{end}}
+
+{{define "content"}}
+<article>
+  <header><h2 style="margin-bottom: 0.25rem;">Issue intermediate CA</h2></header>
+  <p><small>Intermediates are signed by a root and host a CRL distribution point. They typically live for ~5 years.</small></p>
+
+  {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
+
+  {{if not .ParentChoices}}
+    <p><strong>No root CAs available.</strong> <a href="/certs/new/root">Issue one first.</a></p>
+  {{else}}
+  <form method="post" action="/certs/new/intermediate">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="form_token" value="{{.FormToken}}">
+
+    <label>Parent root CA (required)
+      <select name="parent_id" required>
+        <option value="">— pick a root —</option>
+        {{range .ParentChoices}}
+        <option value="{{.ID}}" {{if eq $.ParentID .ID}}selected{{end}}>{{.CN}}</option>
+        {{end}}
+      </select>
+    </label>
+
+    <fieldset>
+      <legend><strong>Subject</strong></legend>
+      <label>Common Name (required)
+        <input type="text" name="subject_cn" required autofocus value="{{.SubjectCN}}">
+      </label>
+      <div class="grid">
+        <label>Organization
+          <input type="text" name="subject_o" value="{{.SubjectO}}">
+        </label>
+        <label>Organizational Unit
+          <input type="text" name="subject_ou" value="{{.SubjectOU}}">
+        </label>
+      </div>
+      <div class="grid">
+        <label>Locality
+          <input type="text" name="subject_l" value="{{.SubjectL}}">
+        </label>
+        <label>State / Province
+          <input type="text" name="subject_st" value="{{.SubjectST}}">
+        </label>
+        <label>Country
+          <input type="text" name="subject_c" maxlength="2" value="{{.SubjectC}}">
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend><strong>Key</strong></legend>
+      <div class="grid">
+        <label>Algorithm
+          <select name="key_algo">
+            <option value="rsa" {{if eq .KeyAlgo "rsa"}}selected{{end}}>RSA</option>
+            <option value="ecdsa" {{if eq .KeyAlgo "ecdsa"}}selected{{end}}>ECDSA</option>
+            <option value="ed25519" {{if eq .KeyAlgo "ed25519"}}selected{{end}}>Ed25519</option>
+          </select>
+        </label>
+        <label>Parameters
+          <input type="text" name="key_algo_params" value="{{.KeyAlgoParams}}" placeholder="2048 / 3072 / 4096 (RSA), P-256 / P-384 (ECDSA)">
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend><strong>Validity</strong></legend>
+      <label>Days
+        <input type="number" name="validity_days" min="1" required value="{{.ValidityDays}}">
+      </label>
+    </fieldset>
+
+    <button type="submit" style="margin-top: 0.5rem;">Issue intermediate CA</button>
+  </form>
+  {{end}}
+</article>
+{{end}}

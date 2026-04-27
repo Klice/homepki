@@ -59,26 +59,66 @@ var ErrCertNotFound = errors.New("cert not found")
 // InsertCert writes the cert and its key bundle in one transaction.
 // Either both rows are written or neither is.
 func InsertCert(db *sql.DB, c *Cert, k *CertKey) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("InsertCert: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertCertTx(tx, c, k); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("InsertCert: commit: %w", err)
+	}
+	return nil
+}
+
+// IssueCertWithToken atomically inserts the cert + key bundle and marks the
+// supplied form token as used (with resultURL for replay redirects). Either
+// all three rows reach their final state, or none do.
+//
+// resultURL is the URL the POST handler 303-redirects to on success; replays
+// of the same form_token return that same URL via MarkIdemTokenUsed +
+// LookupIdemToken in the next request.
+func IssueCertWithToken(db *sql.DB, c *Cert, k *CertKey, formToken, resultURL string) error {
+	if formToken == "" {
+		return errors.New("IssueCertWithToken: form token required")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("IssueCertWithToken: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertCertTx(tx, c, k); err != nil {
+		return err
+	}
+	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
+		return fmt.Errorf("IssueCertWithToken: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("IssueCertWithToken: commit: %w", err)
+	}
+	return nil
+}
+
+// insertCertTx is the shared body of InsertCert / IssueCertWithToken. Operates
+// inside a caller-supplied transaction so combinators can compose multiple
+// writes atomically.
+func insertCertTx(tx dbtx, c *Cert, k *CertKey) error {
 	if c == nil || k == nil {
-		return errors.New("InsertCert: cert and key required")
+		return errors.New("insertCertTx: cert and key required")
 	}
 	if c.ID == "" || k.CertID == "" {
-		return errors.New("InsertCert: cert.ID and key.CertID required")
+		return errors.New("insertCertTx: cert.ID and key.CertID required")
 	}
 	if c.ID != k.CertID {
-		return fmt.Errorf("InsertCert: cert.ID %q != key.CertID %q", c.ID, k.CertID)
+		return fmt.Errorf("insertCertTx: cert.ID %q != key.CertID %q", c.ID, k.CertID)
 	}
 
 	sanDNSJSON, _ := json.Marshal(strSliceOrEmpty(c.SANDNS))
 	sanIPsJSON, _ := json.Marshal(strSliceOrEmpty(c.SANIPs))
 	keyUsageJSON, _ := json.Marshal(strSliceOrEmpty(c.KeyUsage))
 	extKeyUsageJSON, _ := json.Marshal(strSliceOrEmpty(c.ExtKeyUsage))
-
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("InsertCert: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`
 		INSERT INTO certificates (
@@ -96,7 +136,7 @@ func InsertCert(db *sql.DB, c *Cert, k *CertKey) error {
 		c.NotBefore.UTC(), c.NotAfter.UTC(), c.DERCert, c.FingerprintSHA256,
 		nonEmptyOrDefault(c.Status, "active"), c.ReplacesID,
 	); err != nil {
-		return fmt.Errorf("InsertCert: insert certificates: %w", err)
+		return fmt.Errorf("insertCertTx: insert certificates: %w", err)
 	}
 
 	if _, err := tx.Exec(`
@@ -105,10 +145,7 @@ func InsertCert(db *sql.DB, c *Cert, k *CertKey) error {
 		k.CertID, nonEmptyOrDefault(k.KEKTier, "main"),
 		k.WrappedDEK, k.DEKNonce, k.CipherNonce, k.Ciphertext,
 	); err != nil {
-		return fmt.Errorf("InsertCert: insert cert_keys: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("InsertCert: commit: %w", err)
+		return fmt.Errorf("insertCertTx: insert cert_keys: %w", err)
 	}
 	return nil
 }

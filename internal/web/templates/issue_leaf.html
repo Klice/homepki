@@ -1,0 +1,87 @@
+{{define "title"}}homepki — issue leaf cert{{end}}
+
+{{define "header_actions"}}
+<nav>
+  <ul>
+    <li><span class="pill pill-ok">unlocked</span></li>
+    <li><a href="/">← Back</a></li>
+  </ul>
+</nav>
+{{end}}
+
+{{define "content"}}
+<article>
+  <header><h2 style="margin-bottom: 0.25rem;">Issue leaf certificate</h2></header>
+  <p><small>Leaves carry serverAuth EKU and one or more SANs. They typically live for 90 days.</small></p>
+
+  {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
+
+  {{if not .ParentChoices}}
+    <p><strong>No active CAs available.</strong> <a href="/certs/new/intermediate">Issue an intermediate first.</a></p>
+  {{else}}
+  <form method="post" action="/certs/new/leaf">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="form_token" value="{{.FormToken}}">
+
+    <label>Parent CA (required)
+      <select name="parent_id" required>
+        <option value="">— pick an issuing CA —</option>
+        {{range .ParentChoices}}
+        <option value="{{.ID}}" {{if eq $.ParentID .ID}}selected{{end}}>{{.CN}} ({{.Type}})</option>
+        {{end}}
+      </select>
+    </label>
+
+    <fieldset>
+      <legend><strong>Subject</strong></legend>
+      <label>Common Name (required)
+        <input type="text" name="subject_cn" required autofocus value="{{.SubjectCN}}" placeholder="leaf.lan">
+      </label>
+      <div class="grid">
+        <label>Organization
+          <input type="text" name="subject_o" value="{{.SubjectO}}">
+        </label>
+        <label>Organizational Unit
+          <input type="text" name="subject_ou" value="{{.SubjectOU}}">
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend><strong>Subject alternative names</strong> <small>(at least one required)</small></legend>
+      <label>DNS names <small>— one per line, or comma-separated</small>
+        <textarea name="san_dns" rows="3" placeholder="leaf.lan&#10;alt.leaf.lan">{{.SANDNS}}</textarea>
+      </label>
+      <label>IP addresses <small>— one per line, or comma-separated</small>
+        <textarea name="san_ip" rows="2" placeholder="10.0.0.1">{{.SANIPs}}</textarea>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend><strong>Key</strong></legend>
+      <div class="grid">
+        <label>Algorithm
+          <select name="key_algo">
+            <option value="rsa" {{if eq .KeyAlgo "rsa"}}selected{{end}}>RSA</option>
+            <option value="ecdsa" {{if eq .KeyAlgo "ecdsa"}}selected{{end}}>ECDSA</option>
+            <option value="ed25519" {{if eq .KeyAlgo "ed25519"}}selected{{end}}>Ed25519</option>
+          </select>
+        </label>
+        <label>Parameters
+          <input type="text" name="key_algo_params" value="{{.KeyAlgoParams}}" placeholder="P-256 / P-384 / 2048 / 3072 / 4096">
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend><strong>Validity</strong></legend>
+      <label>Days
+        <input type="number" name="validity_days" min="1" required value="{{.ValidityDays}}">
+      </label>
+    </fieldset>
+
+    <button type="submit" style="margin-top: 0.5rem;">Issue leaf certificate</button>
+  </form>
+  {{end}}
+</article>
+{{end}}
