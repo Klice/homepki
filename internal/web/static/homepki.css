@@ -1,0 +1,80 @@
+/* homepki — overrides on top of pico.css to keep the UI lighter than
+   pico's defaults. Page-specific styles live in their own files. */
+
+:root {
+  --pico-font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --pico-font-family-monospace: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --pico-font-size: 95%;
+  --pico-font-weight: 400;
+  --pico-line-height: 1.4;
+  --pico-spacing: 0.6rem;
+  --pico-block-spacing-vertical: 0.75rem;
+  --pico-block-spacing-horizontal: 0.75rem;
+  --pico-form-element-spacing-vertical: 0.4rem;
+  --pico-form-element-spacing-horizontal: 0.6rem;
+  --pico-border-radius: 4px;
+  --pico-card-box-shadow: none;
+}
+
+body { max-width: 1280px; margin-inline: auto; padding-inline: 1rem; }
+h1, h2, h3, h4 { font-weight: 500; }
+
+/* App chrome */
+header.app {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.75rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  margin-bottom: 1rem;
+}
+header.app .brand {
+  font-weight: 600;
+  font-size: 1rem;
+  text-decoration: none;
+  color: inherit;
+}
+header.app .brand small {
+  color: var(--pico-muted-color);
+  font-weight: 400;
+  margin-left: 0.5rem;
+}
+header.app nav ul {
+  display: flex;
+  gap: 0.9rem;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+header.app nav a,
+header.app nav button {
+  font-size: 0.88rem;
+  padding: 0.3rem 0.7rem;
+  margin: 0;
+}
+header.app nav button { line-height: 1.2; }
+
+footer.app {
+  margin: 1.5rem 0 1rem;
+  color: var(--pico-muted-color);
+  font-size: 0.8rem;
+}
+
+/* Status pills, used for cert status, lock state, and similar one-word
+   status labels in tables and headers. */
+.pill {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.5;
+  vertical-align: 1px;
+  letter-spacing: 0.02em;
+}
+.pill-ok    { background: #e6f4ea; color: #1e7a3c; }
+.pill-warn  { background: #fdf3d8; color: #8a6300; }
+.pill-bad   { background: #fce8e6; color: #a8261a; }
+.pill-muted { background: #eceff2; color: #5b6470; }
