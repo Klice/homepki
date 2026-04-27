@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Klice/homepki/internal/config"
+	"github.com/Klice/homepki/internal/crypto"
 )
 
 func TestLoadTemplates_NoErrors(t *testing.T) {
@@ -87,7 +88,7 @@ func TestLayoutDefaults_TitleAndHeaderActions(t *testing.T) {
 func mustNewServer(t *testing.T) *Server {
 	t.Helper()
 	db := openInMemoryDB(t)
-	srv, err := New(config.Config{}, db)
+	srv, err := New(config.Config{}, db, crypto.NewKeystore())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

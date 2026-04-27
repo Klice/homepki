@@ -1,0 +1,21 @@
+{{define "title"}}homepki{{end}}
+
+{{define "header_actions"}}
+<nav>
+  <ul>
+    <li><span class="pill pill-ok">unlocked</span></li>
+    <li>
+      <form method="post" action="/lock" style="margin: 0;">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit" class="secondary outline">Lock</button>
+      </form>
+    </li>
+  </ul>
+</nav>
+{{end}}
+
+{{define "content"}}
+<article>
+  <p>You are unlocked. Certificate management lands in a follow-up.</p>
+</article>
+{{end}}

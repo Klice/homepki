@@ -6,14 +6,16 @@ import (
 	"net/http"
 
 	"github.com/Klice/homepki/internal/config"
+	"github.com/Klice/homepki/internal/crypto"
 )
 
-// Server wires the HTTP mux, configuration, database, and parsed templates
-// into one handler. All endpoint logic lives in handlers_*.go files;
-// this file is the wiring.
+// Server wires the HTTP mux, configuration, database, keystore, and parsed
+// templates into one handler. All endpoint logic lives in handlers_*.go
+// files; this file is the wiring.
 type Server struct {
 	cfg       config.Config
 	db        *sql.DB
+	keystore  *crypto.Keystore
 	templates map[string]*template.Template
 	mux       *http.ServeMux
 	handler   http.Handler // mux wrapped in middleware
@@ -22,7 +24,7 @@ type Server struct {
 // New constructs a Server with all routes registered and middleware applied.
 // Returns an error if any embedded template fails to parse — bad templates
 // are programmer errors and should fail loud at startup, not at first request.
-func New(cfg config.Config, db *sql.DB) (*Server, error) {
+func New(cfg config.Config, db *sql.DB, keystore *crypto.Keystore) (*Server, error) {
 	tmpls, err := loadTemplates()
 	if err != nil {
 		return nil, err
@@ -30,6 +32,7 @@ func New(cfg config.Config, db *sql.DB) (*Server, error) {
 	s := &Server{
 		cfg:       cfg,
 		db:        db,
+		keystore:  keystore,
 		templates: tmpls,
 		mux:       http.NewServeMux(),
 	}
@@ -48,4 +51,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", staticHandler()))
+	s.mux.HandleFunc("GET /", s.handleIndex)
+	s.mux.HandleFunc("GET /setup", s.handleSetupGet)
+	s.mux.HandleFunc("POST /setup", s.handleSetupPost)
+	s.mux.HandleFunc("GET /unlock", s.handleUnlockGet)
+	s.mux.HandleFunc("POST /unlock", s.handleUnlockPost)
+	s.mux.HandleFunc("POST /lock", s.handleLock)
 }
