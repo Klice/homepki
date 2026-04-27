@@ -1,0 +1,24 @@
+{{define "title"}}homepki — first-run setup{{end}}
+
+{{define "content"}}
+<article>
+  <header><h2 style="margin-bottom: 0.25rem;">First-run setup</h2></header>
+  <p>Choose a passphrase to encrypt the PKI keystore. Make it strong — there is no recovery if you forget it.</p>
+
+  {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
+
+  <form method="post" action="/setup">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label>
+      Passphrase
+      <input type="password" name="passphrase" required minlength="{{.MinLen}}" autocomplete="new-password" autofocus>
+    </label>
+    <label>
+      Confirm passphrase
+      <input type="password" name="passphrase2" required minlength="{{.MinLen}}" autocomplete="new-password">
+    </label>
+    <small>Must be at least {{.MinLen}} characters.</small>
+    <button type="submit" style="margin-top: 0.75rem;">Set passphrase</button>
+  </form>
+</article>
+{{end}}
