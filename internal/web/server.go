@@ -1,9 +1,13 @@
 package web
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"fmt"
 	"html/template"
 	"net/http"
+
+	"github.com/gorilla/csrf"
 
 	"github.com/Klice/homepki/internal/config"
 	"github.com/Klice/homepki/internal/crypto"
@@ -29,6 +33,16 @@ func New(cfg config.Config, db *sql.DB, keystore *crypto.Keystore) (*Server, err
 	if err != nil {
 		return nil, err
 	}
+
+	// gorilla/csrf needs a 32-byte secret to HMAC-sign tokens with. Random
+	// per-process — the trade-off is that an in-flight browser session
+	// loses its CSRF token across restart and needs a refresh, which is
+	// acceptable for a single-operator tool.
+	csrfSecret := make([]byte, 32)
+	if _, err := rand.Read(csrfSecret); err != nil {
+		return nil, fmt.Errorf("csrf: generate secret: %w", err)
+	}
+
 	s := &Server{
 		cfg:       cfg,
 		db:        db,
@@ -37,8 +51,34 @@ func New(cfg config.Config, db *sql.DB, keystore *crypto.Keystore) (*Server, err
 		mux:       http.NewServeMux(),
 	}
 	s.routes()
-	s.handler = CSRF(s.mux)
+	// Cookie/field names match the existing API contract documented in
+	// API.md §2.2. Secure(false) because the SPEC deployment model puts
+	// homepki behind a reverse proxy that terminates TLS — the
+	// proxy→app hop is plain HTTP, so a Secure cookie wouldn't make it
+	// through.
+	csrfMW := csrf.Protect(csrfSecret,
+		csrf.CookieName(csrfCookieName),
+		csrf.FieldName(csrfFormField),
+		csrf.Path("/"),
+		csrf.HttpOnly(true),
+		csrf.SameSite(csrf.SameSiteLaxMode),
+		csrf.Secure(false),
+	)
+	s.handler = plaintextHTTPDetect(csrfMW(s.mux))
 	return s, nil
+}
+
+// plaintextHTTPDetect tells gorilla/csrf when a request actually arrived over
+// plain HTTP. Without this, gorilla assumes HTTPS and rejects POSTs without
+// a Referer header. We mark requests that have neither r.TLS nor an
+// X-Forwarded-Proto=https hint as plaintext, matching isHTTPS.
+func plaintextHTTPDetect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isHTTPS(r) {
+			r = csrf.PlaintextHTTPRequest(r)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ServeHTTP makes Server an http.Handler.
