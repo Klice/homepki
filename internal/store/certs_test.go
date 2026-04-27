@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"reflect"
 	"testing"
@@ -163,3 +164,138 @@ func TestInsertCert_DefaultsAndCascade(t *testing.T) {
 }
 
 func ptrStr(s string) *string { return &s }
+
+// makeCert builds a minimal cert for list/chain tests with all required
+// fields populated. Caller overrides type, parent, ID as needed.
+func makeCert(id, ctype string, parentID *string, cn string) *Cert {
+	return &Cert{
+		ID:                id,
+		Type:              ctype,
+		ParentID:          parentID,
+		SerialNumber:      "01",
+		SubjectCN:         cn,
+		IsCA:              ctype != "leaf",
+		KeyAlgo:           "ecdsa",
+		KeyAlgoParams:     "P-256",
+		NotBefore:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:          time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		DERCert:           []byte{0x30, 0x82, 0x01},
+		FingerprintSHA256: "fp-" + id,
+	}
+}
+
+// seed inserts a small chain — root → intermediate → leaf — with stable IDs.
+func seed(t *testing.T, db *sql.DB) (rootID, interID, leafID string) {
+	t.Helper()
+	rootID, interID, leafID = "root-id", "inter-id", "leaf-id"
+	if err := InsertCert(db, makeCert(rootID, "root_ca", nil, "Root"), sampleKey(rootID)); err != nil {
+		t.Fatalf("seed root: %v", err)
+	}
+	rid := rootID
+	if err := InsertCert(db, makeCert(interID, "intermediate_ca", &rid, "Intermediate"), sampleKey(interID)); err != nil {
+		t.Fatalf("seed intermediate: %v", err)
+	}
+	iid := interID
+	if err := InsertCert(db, makeCert(leafID, "leaf", &iid, "leaf.test"), sampleKey(leafID)); err != nil {
+		t.Fatalf("seed leaf: %v", err)
+	}
+	return rootID, interID, leafID
+}
+
+func TestListCAs(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	rootID, interID, _ := seed(t, db)
+
+	cas, err := ListCAs(db)
+	if err != nil {
+		t.Fatalf("ListCAs: %v", err)
+	}
+	gotIDs := map[string]bool{}
+	for _, c := range cas {
+		gotIDs[c.ID] = true
+	}
+	if !gotIDs[rootID] || !gotIDs[interID] {
+		t.Errorf("ListCAs missing entries: got %v", gotIDs)
+	}
+	if len(cas) != 2 {
+		t.Errorf("ListCAs len: got %d, want 2", len(cas))
+	}
+}
+
+func TestListLeaves(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	_, _, leafID := seed(t, db)
+
+	leaves, err := ListLeaves(db)
+	if err != nil {
+		t.Fatalf("ListLeaves: %v", err)
+	}
+	if len(leaves) != 1 || leaves[0].ID != leafID {
+		t.Errorf("ListLeaves: got %d entries", len(leaves))
+	}
+}
+
+func TestListCAs_EmptyOnFreshDB(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	cas, err := ListCAs(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cas) != 0 {
+		t.Errorf("expected empty, got %d", len(cas))
+	}
+}
+
+func TestGetChain_LeafToRoot(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	rootID, interID, leafID := seed(t, db)
+
+	chain, err := GetChain(db, leafID)
+	if err != nil {
+		t.Fatalf("GetChain: %v", err)
+	}
+	if len(chain) != 3 {
+		t.Fatalf("chain length: got %d, want 3", len(chain))
+	}
+	if chain[0].ID != leafID || chain[1].ID != interID || chain[2].ID != rootID {
+		t.Errorf("chain order: got %s -> %s -> %s, want %s -> %s -> %s",
+			chain[0].ID, chain[1].ID, chain[2].ID, leafID, interID, rootID)
+	}
+}
+
+func TestGetChain_RootIsSingleton(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	rootID, _, _ := seed(t, db)
+	chain, err := GetChain(db, rootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chain) != 1 || chain[0].ID != rootID {
+		t.Errorf("chain: got %d entries", len(chain))
+	}
+}
+
+func TestGetChain_NotFound(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetChain(db, "no-such"); !errors.Is(err, ErrCertNotFound) {
+		t.Errorf("got %v, want ErrCertNotFound", err)
+	}
+}

@@ -2,40 +2,56 @@ package web
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/Klice/homepki/internal/store"
 )
 
-// indexViewData is the data for the placeholder main view. The cert
-// browsing UI lands in a future phase.
+// indexViewData is the data for the main view: two flat tables of CAs and
+// leaves enriched with computed display fields.
 type indexViewData struct {
-	CSRFToken string
+	CSRFToken   string
+	Authorities []*CertView
+	Leaves      []*CertView
 }
 
-// handleIndex is the main view dispatcher. It funnels traffic to /setup
-// when the app is unconfigured, to /unlock when locked or sessionless,
-// and otherwise renders the placeholder index page.
+// handleIndex renders the main view at GET /. Redirects to /setup or
+// /unlock as appropriate.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	// 1.22 ServeMux registers "GET /" as a catch-all; explicit 404 for
-	// anything that isn't exactly "/".
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-	setUp, err := store.IsSetUp(s.db)
+	if !s.requireUnlocked(w, r) {
+		return
+	}
+
+	cas, err := store.ListCAs(s.db)
 	if err != nil {
-		internalServerError(w, "index: IsSetUp", err)
+		internalServerError(w, "index: ListCAs", err)
 		return
 	}
-	if !setUp {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+	leaves, err := store.ListLeaves(s.db)
+	if err != nil {
+		internalServerError(w, "index: ListLeaves", err)
 		return
 	}
-	if !s.keystore.IsUnlocked() || !hasValidSession(r, s.keystore) {
-		http.Redirect(w, r, "/unlock", http.StatusSeeOther)
-		return
-	}
+
+	cnByID := buildCNLookup(cas)
+	now := time.Now()
 	s.render(w, "index", indexViewData{
-		CSRFToken: CSRFToken(r),
+		CSRFToken:   CSRFToken(r),
+		Authorities: newCertViews(cas, cnByID, now),
+		Leaves:      newCertViews(leaves, cnByID, now),
 	})
+}
+
+// buildCNLookup turns a slice of certs into an ID → CN map, used by the
+// CertView enrichment to resolve issuer names.
+func buildCNLookup(certs []*store.Cert) map[string]string {
+	out := make(map[string]string, len(certs))
+	for _, c := range certs {
+		out[c.ID] = c.SubjectCN
+	}
+	return out
 }
