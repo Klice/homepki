@@ -10,11 +10,12 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/Klice/homepki/internal/config"
+	"github.com/Klice/homepki/internal/crypto"
 )
 
 func TestHandleHealthz_OK(t *testing.T) {
 	db := openInMemoryDB(t)
-	srv, err := New(config.Config{}, db)
+	srv, err := New(config.Config{}, db, crypto.NewKeystore())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -40,7 +41,7 @@ func TestHandleHealthz_DBUnreachable(t *testing.T) {
 	// sql.ErrConnDone, which is exactly the "db unavailable" path.
 	_ = db.Close()
 
-	srv, err := New(config.Config{}, db)
+	srv, err := New(config.Config{}, db, crypto.NewKeystore())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

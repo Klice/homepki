@@ -163,6 +163,45 @@ func TestCSRF_CRLEndpoint_IsExempt(t *testing.T) {
 	}
 }
 
+func TestCSRF_TokenInRequestContext(t *testing.T) {
+	var seen string
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = CSRFToken(r)
+	})
+	h := CSRF(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	cookie := extractCookie(t, w, "csrf")
+	if cookie == nil {
+		t.Fatal("no csrf cookie was set")
+	}
+	if seen == "" {
+		t.Fatal("CSRFToken returned empty string in handler")
+	}
+	if seen != cookie.Value {
+		t.Errorf("context token %q does not match cookie value %q", seen, cookie.Value)
+	}
+}
+
+func TestCSRFToken_EmptyOnExemptPath(t *testing.T) {
+	var seen string
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = CSRFToken(r)
+	})
+	h := CSRF(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if seen != "" {
+		t.Errorf("CSRFToken on exempt path: got %q, want empty", seen)
+	}
+}
+
 func TestIsHTTPS(t *testing.T) {
 	cases := []struct {
 		name string

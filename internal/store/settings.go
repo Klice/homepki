@@ -16,9 +16,17 @@ const (
 // ErrSettingNotFound is returned by GetSetting when the key has no row.
 var ErrSettingNotFound = errors.New("setting not found")
 
+// dbtx is the read+write surface implemented by both *sql.DB and *sql.Tx.
+// Callers may pass either, so settings helpers compose naturally inside a
+// transaction (e.g. first-run setup writes salt+params+verifier atomically).
+type dbtx interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // GetSetting returns the value stored under key. Returns ErrSettingNotFound
 // if the key does not exist.
-func GetSetting(db *sql.DB, key string) ([]byte, error) {
+func GetSetting(db dbtx, key string) ([]byte, error) {
 	var v []byte
 	err := db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -32,7 +40,7 @@ func GetSetting(db *sql.DB, key string) ([]byte, error) {
 
 // SetSetting upserts a value for key. The updated_at column is refreshed
 // on every write.
-func SetSetting(db *sql.DB, key string, value []byte) error {
+func SetSetting(db dbtx, key string, value []byte) error {
 	_, err := db.Exec(
 		`INSERT INTO settings (key, value, updated_at)
 		 VALUES (?, ?, datetime('now'))
@@ -47,7 +55,7 @@ func SetSetting(db *sql.DB, key string, value []byte) error {
 // IsSetUp reports whether first-run setup has completed — i.e. whether the
 // passphrase verifier is present. Used to gate the /setup vs /unlock flow
 // per LIFECYCLE.md §1.1.
-func IsSetUp(db *sql.DB) (bool, error) {
+func IsSetUp(db dbtx) (bool, error) {
 	_, err := GetSetting(db, SettingPassphraseVerifier)
 	if errors.Is(err, ErrSettingNotFound) {
 		return false, nil

@@ -1,12 +1,30 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"strings"
 )
+
+// csrfTokenKey is the unexported request-context key for the CSRF token
+// issued by the middleware. Use CSRFToken to retrieve it.
+type csrfTokenKey struct{}
+
+// CSRFToken returns the CSRF token for the current request, populated by
+// the CSRF middleware. Returns "" if the middleware did not run (exempt
+// path, or the request never went through CSRF).
+//
+// Templates render this into a hidden form field on every state-changing
+// form so the matching POST validates against the cookie.
+func CSRFToken(r *http.Request) string {
+	if v, ok := r.Context().Value(csrfTokenKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
 
 // API.md §2.2 — cookie name and form field name for the CSRF token.
 const (
@@ -34,6 +52,9 @@ func CSRF(next http.Handler) http.Handler {
 			http.Error(w, "csrf: failed to issue token", http.StatusInternalServerError)
 			return
 		}
+		// Make the token available to downstream handlers via context so they
+		// can render it into form templates.
+		r = r.WithContext(context.WithValue(r.Context(), csrfTokenKey{}, token))
 		if isStateChanging(r.Method) {
 			if err := r.ParseForm(); err != nil {
 				http.Error(w, "csrf: bad form", http.StatusBadRequest)
