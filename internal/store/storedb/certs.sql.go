@@ -211,6 +211,41 @@ func (q *Queries) ListCAs(ctx context.Context) ([]string, error) {
 	return items, nil
 }
 
+const listCertKeyWraps = `-- name: ListCertKeyWraps :many
+SELECT cert_id, wrapped_dek, dek_nonce
+FROM cert_keys
+ORDER BY cert_id
+`
+
+type ListCertKeyWrapsRow struct {
+	CertID     string
+	WrappedDek []byte
+	DekNonce   []byte
+}
+
+func (q *Queries) ListCertKeyWraps(ctx context.Context) ([]ListCertKeyWrapsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCertKeyWraps)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCertKeyWrapsRow{}
+	for rows.Next() {
+		var i ListCertKeyWrapsRow
+		if err := rows.Scan(&i.CertID, &i.WrappedDek, &i.DekNonce); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLeaves = `-- name: ListLeaves :many
 SELECT id FROM certificates
 WHERE type = 'leaf'
@@ -311,6 +346,26 @@ type SupersedeCertParams struct {
 
 func (q *Queries) SupersedeCert(ctx context.Context, arg SupersedeCertParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, supersedeCert, arg.ReplacedByID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateCertKeyWrap = `-- name: UpdateCertKeyWrap :execrows
+UPDATE cert_keys
+   SET wrapped_dek = ?, dek_nonce = ?
+   WHERE cert_id = ?
+`
+
+type UpdateCertKeyWrapParams struct {
+	WrappedDek []byte
+	DekNonce   []byte
+	CertID     string
+}
+
+func (q *Queries) UpdateCertKeyWrap(ctx context.Context, arg UpdateCertKeyWrapParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateCertKeyWrap, arg.WrappedDek, arg.DekNonce, arg.CertID)
 	if err != nil {
 		return 0, err
 	}

@@ -56,3 +56,13 @@ UPDATE certificates
 UPDATE certificates
    SET status = 'superseded', replaced_by_id = ?
    WHERE id = ? AND status = 'active';
+
+-- name: ListCertKeyWraps :many
+SELECT cert_id, wrapped_dek, dek_nonce
+FROM cert_keys
+ORDER BY cert_id;
+
+-- name: UpdateCertKeyWrap :execrows
+UPDATE cert_keys
+   SET wrapped_dek = ?, dek_nonce = ?
+   WHERE cert_id = ?;
