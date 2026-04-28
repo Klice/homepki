@@ -7,6 +7,7 @@ require (
 	github.com/gorilla/csrf v1.7.3
 	golang.org/x/crypto v0.50.0
 	modernc.org/sqlite v1.50.0
+	software.sslmate.com/src/go-pkcs12 v0.7.1
 )
 
 require (

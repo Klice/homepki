@@ -54,6 +54,10 @@ generate-check: ## fail if generated code is stale relative to schema/queries
 lint: ## golangci-lint (devcontainer has it pre-installed)
 	golangci-lint run
 
+.PHONY: smoke
+smoke: ## end-to-end smoke against a real binary (curl + openssl assertions)
+	scripts/smoke.sh
+
 .PHONY: check
 check: vet test ## quick local CI: vet + test
 

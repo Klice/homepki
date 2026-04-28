@@ -119,8 +119,33 @@
   </details>
   {{end}}
 
-  <p style="color: var(--pico-muted-color); font-size: 0.8rem;">
-    Downloads, rotation, and deploy actions land in upcoming releases.
-  </p>
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Downloads</h3>
+  <ul>
+    <li><a href="/certs/{{.View.ID}}/cert.pem">cert.pem</a> <small>— PEM-encoded certificate</small></li>
+    <li><a href="/certs/{{.View.ID}}/key.pem">key.pem</a> <small>— PKCS#8 private key (decrypted with the in-memory KEK)</small></li>
+    {{if ne .View.Type "root_ca"}}
+    <li><a href="/certs/{{.View.ID}}/chain.pem">chain.pem</a> <small>— issuing chain, excluding the self-signed root</small></li>
+    {{end}}
+    {{if eq .View.Type "leaf"}}
+    <li><a href="/certs/{{.View.ID}}/fullchain.pem">fullchain.pem</a> <small>— this cert followed by the chain</small></li>
+    {{end}}
+  </ul>
+
+  {{if eq .View.Type "leaf"}}
+  <details>
+    <summary>PKCS#12 bundle (key + leaf + chain)</summary>
+    <form method="post" action="/certs/{{.View.ID}}/bundle.p12" style="margin-top: 0.5rem;">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <label>Bundle password
+        <input type="password" name="password" required autocomplete="new-password">
+      </label>
+      <button type="submit" class="secondary">Download bundle.p12</button>
+      <small style="display: block; color: var(--pico-muted-color); margin-top: 0.5rem;">
+        The password protects the private key inside the bundle. POST is used so the
+        password isn't recorded in URLs or referrer headers.
+      </small>
+    </form>
+  </details>
+  {{end}}
 </article>
 {{end}}
