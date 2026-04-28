@@ -283,6 +283,141 @@ func TestIssueCertWithToken_InitialCRLRollsBackOnFailure(t *testing.T) {
 	}
 }
 
+func TestIssueRotationWithToken_AtomicSuccess(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	rootID, _, _ := seed(t, db)
+	tok, err := CreateIdemToken(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// New cert (a successor root) with replaces_id pointing at the existing root.
+	newCert := makeCert("rotated-root", "root_ca", nil, "Replacement Root")
+	rid := rootID
+	newCert.ReplacesID = &rid
+	newKey := sampleKey("rotated-root")
+
+	if err := IssueRotationWithToken(db, newCert, newKey, nil, rootID, tok, "/certs/rotated-root"); err != nil {
+		t.Fatalf("IssueRotationWithToken: %v", err)
+	}
+
+	// Old cert is now superseded with replaced_by_id forward-link.
+	old, err := GetCert(db, rootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.Status != "superseded" {
+		t.Errorf("old status: got %q, want superseded", old.Status)
+	}
+	if old.ReplacedByID == nil || *old.ReplacedByID != "rotated-root" {
+		t.Errorf("old.ReplacedByID: got %v, want 'rotated-root'", old.ReplacedByID)
+	}
+
+	// New cert is active with replaces_id back-link.
+	got, err := GetCert(db, "rotated-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "active" {
+		t.Errorf("new status: got %q, want active", got.Status)
+	}
+	if got.ReplacesID == nil || *got.ReplacesID != rootID {
+		t.Errorf("new.ReplacesID: got %v, want %s", got.ReplacesID, rootID)
+	}
+
+	// Token is marked.
+	row, err := LookupIdemToken(db, tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.UsedAt == nil {
+		t.Error("token should have been marked used")
+	}
+}
+
+func TestIssueRotationWithToken_RefusesNonActiveOld(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	_, _, leafID := seed(t, db)
+	// Pre-revoke the leaf — rotation must refuse.
+	if _, err := MarkRevoked(db, leafID, 1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := CreateIdemToken(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newCert := makeCert("would-be-replacement", "leaf", ptrStr("inter-id"), "leaf2.test")
+	newCert.SerialNumber = "02" // distinct from seed leaf to avoid UNIQUE(parent_id, serial)
+	lid := leafID
+	newCert.ReplacesID = &lid
+
+	err = IssueRotationWithToken(db, newCert, sampleKey("would-be-replacement"), nil, leafID, tok, "/x")
+	if !errors.Is(err, ErrSupersedeNotActive) {
+		t.Errorf("got %v, want ErrSupersedeNotActive", err)
+	}
+	// And nothing else changed: token unmarked, new cert absent.
+	if _, err := GetCert(db, "would-be-replacement"); !errors.Is(err, ErrCertNotFound) {
+		t.Error("new cert should not have been written")
+	}
+	row, err := LookupIdemToken(db, tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.UsedAt != nil {
+		t.Error("token should not have been marked used")
+	}
+}
+
+func TestIssueRotationWithToken_RejectsBadInputs(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	rootID, _, _ := seed(t, db)
+	tok, _ := CreateIdemToken(db)
+
+	rid := rootID
+	good := makeCert("new-root", "root_ca", nil, "X")
+	good.ReplacesID = &rid
+
+	cases := []struct {
+		name string
+		fn   func() error
+	}{
+		{"empty token", func() error {
+			return IssueRotationWithToken(db, good, sampleKey("new-root"), nil, rootID, "", "/x")
+		}},
+		{"empty oldID", func() error {
+			return IssueRotationWithToken(db, good, sampleKey("new-root"), nil, "", tok, "/x")
+		}},
+		{"missing replaces_id", func() error {
+			bad := makeCert("new-root", "root_ca", nil, "X")
+			// no ReplacesID set
+			return IssueRotationWithToken(db, bad, sampleKey("new-root"), nil, rootID, tok, "/x")
+		}},
+		{"replaces_id mismatch", func() error {
+			bad := makeCert("new-root", "root_ca", nil, "X")
+			other := "other-id"
+			bad.ReplacesID = &other
+			return IssueRotationWithToken(db, bad, sampleKey("new-root"), nil, rootID, tok, "/x")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.fn(); err == nil {
+				t.Error("expected error, got nil")
+			}
+		})
+	}
+}
+
 func TestIssueCertWithToken_RejectsEmptyToken(t *testing.T) {
 	db := openTestDB(t)
 	if err := Migrate(db); err != nil {
