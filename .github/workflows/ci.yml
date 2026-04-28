@@ -42,3 +42,6 @@ jobs:
 
       - name: build
         run: go build ./...
+
+      - name: smoke (curl + openssl against a real binary)
+        run: ./scripts/smoke.sh
