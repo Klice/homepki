@@ -102,6 +102,57 @@ func buildInitialCRL(certID string, issued *pki.Issued) (*store.CRL, error) {
 	}, nil
 }
 
+// persistRotation is the rotate-flow analogue of persistIssued. It seals
+// the new key, builds the cert struct (with ReplacesID = oldID), produces
+// an initial CRL when the new cert is itself a CA, and atomically:
+//   - inserts the new cert + key (+ CRL)
+//   - flips the old cert to superseded with replaced_by_id = new id
+//   - marks the form token used
+// Returns the new cert id. Per LIFECYCLE.md §4.2/§4.3.
+func (s *Server) persistRotation(certType string, parentID *string, oldID string, issued *pki.Issued, keySpec pki.KeySpec, formToken string) (string, error) {
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(issued.Key)
+	if err != nil {
+		return "", fmt.Errorf("persistRotation: marshal pkcs8: %w", err)
+	}
+	defer crypto.Zero(pkcs8)
+
+	id := store.NewCertID()
+
+	var sealed *crypto.SealedPrivateKey
+	if err := s.keystore.With(func(kek []byte) error {
+		var serr error
+		sealed, serr = crypto.SealPrivateKey(kek, id, pkcs8)
+		return serr
+	}); err != nil {
+		return "", fmt.Errorf("persistRotation: seal: %w", err)
+	}
+
+	cert := certFromIssued(id, certType, parentID, issued, keySpec)
+	cert.ReplacesID = &oldID
+	key := &store.CertKey{
+		CertID:      id,
+		KEKTier:     "main",
+		WrappedDEK:  sealed.WrappedDEK,
+		DEKNonce:    sealed.DEKNonce,
+		CipherNonce: sealed.CipherNonce,
+		Ciphertext:  sealed.Ciphertext,
+	}
+
+	var initialCRL *store.CRL
+	if cert.IsCA {
+		initialCRL, err = buildInitialCRL(id, issued)
+		if err != nil {
+			return "", fmt.Errorf("persistRotation: initial CRL: %w", err)
+		}
+	}
+
+	resultURL := "/certs/" + id
+	if err := store.IssueRotationWithToken(s.db, cert, key, initialCRL, oldID, formToken, resultURL); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 // loadSigner fetches a CA's parsed cert and decrypted private key, returning
 // a pki.Signer suitable for signing children. The plaintext private key is
 // zeroed before this function returns; the live signer holds a parsed key

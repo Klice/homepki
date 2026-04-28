@@ -1,4 +1,4 @@
-{{define "title"}}homepki — issue leaf cert{{end}}
+{{define "title"}}homepki — {{.PageTitle}}{{end}}
 
 {{define "header_actions"}}
 <nav>
@@ -11,7 +11,7 @@
 
 {{define "content"}}
 <article>
-  <header><h2 style="margin-bottom: 0.25rem;">Issue leaf certificate</h2></header>
+  <header><h2 style="margin-bottom: 0.25rem;">{{.PageHeading}}</h2></header>
   <p><small>Leaves carry serverAuth EKU and one or more SANs. They typically live for 90 days.</small></p>
 
   {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
@@ -19,17 +19,18 @@
   {{if not .ParentChoices}}
     <p><strong>No active CAs available.</strong> <a href="/certs/new/intermediate">Issue an intermediate first.</a></p>
   {{else}}
-  <form method="post" action="/certs/new/leaf">
+  <form method="post" action="{{.FormAction}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <input type="hidden" name="form_token" value="{{.FormToken}}">
 
     <label>Parent CA (required)
-      <select name="parent_id" required>
+      <select name="parent_id" required {{if .ParentLocked}}disabled{{end}}>
         <option value="">— pick an issuing CA —</option>
         {{range .ParentChoices}}
         <option value="{{.ID}}" {{if eq $.ParentID .ID}}selected{{end}}>{{.CN}} ({{.Type}})</option>
         {{end}}
       </select>
+      {{if .ParentLocked}}<input type="hidden" name="parent_id" value="{{.ParentID}}">{{end}}
     </label>
 
     <fieldset>
