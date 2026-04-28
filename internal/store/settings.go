@@ -17,11 +17,13 @@ const (
 var ErrSettingNotFound = errors.New("setting not found")
 
 // dbtx is the read+write surface implemented by both *sql.DB and *sql.Tx.
-// Callers may pass either, so settings helpers compose naturally inside a
-// transaction (e.g. first-run setup writes salt+params+verifier atomically).
+// Callers may pass either, so helpers compose naturally inside a
+// transaction (e.g. first-run setup writes salt+params+verifier atomically;
+// revoke writes the cert update + new CRL row in one tx).
 type dbtx interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	QueryRow(query string, args ...any) *sql.Row
+	Query(query string, args ...any) (*sql.Rows, error)
 }
 
 // GetSetting returns the value stored under key. Returns ErrSettingNotFound

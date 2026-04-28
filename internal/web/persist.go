@@ -7,11 +7,21 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
+	"time"
 
 	"github.com/Klice/homepki/internal/crypto"
 	"github.com/Klice/homepki/internal/pki"
 	"github.com/Klice/homepki/internal/store"
 )
+
+// crlNextUpdateWindow is how far ahead a freshly-generated CRL claims to be
+// valid. LIFECYCLE.md §6.4: "now + 7d".
+const crlNextUpdateWindow = 7 * 24 * time.Hour
+
+// crlClockSkewMargin is how far the CRL's ThisUpdate is shifted into the
+// past to absorb clock skew across the issuer and CRL consumers.
+const crlClockSkewMargin = 60 * time.Second
 
 // persistIssued bridges a freshly-issued cert from the pki package into the
 // store, encrypting the private key under the keystore's KEK and atomically
@@ -48,11 +58,48 @@ func (s *Server) persistIssued(certType string, parentID *string, issued *pki.Is
 		Ciphertext:  sealed.Ciphertext,
 	}
 
+	// CAs get an empty initial CRL (number=1) per LIFECYCLE.md §6.2 so
+	// clients fetching /crl/{id}.crl right after issuance get a valid
+	// CRL rather than a 404. The CRL is signed by the new CA's own key.
+	var initialCRL *store.CRL
+	if cert.IsCA {
+		initialCRL, err = buildInitialCRL(id, issued)
+		if err != nil {
+			return "", fmt.Errorf("persistIssued: initial CRL: %w", err)
+		}
+	}
+
 	resultURL := "/certs/" + id
-	if err := store.IssueCertWithToken(s.db, cert, key, formToken, resultURL); err != nil {
+	if err := store.IssueCertWithToken(s.db, cert, key, initialCRL, formToken, resultURL); err != nil {
 		return "", err
 	}
 	return id, nil
+}
+
+// buildInitialCRL produces the empty CRL written alongside a freshly-issued
+// CA. Self-signed by the CA's own key (which is in issued.Key — we have it
+// in plaintext because it was generated this request).
+func buildInitialCRL(certID string, issued *pki.Issued) (*store.CRL, error) {
+	now := time.Now()
+	thisUpdate := now.Add(-crlClockSkewMargin)
+	nextUpdate := now.Add(crlNextUpdateWindow)
+	der, err := pki.CreateCRL(pki.CRLRequest{
+		Issuer:     &pki.Signer{Cert: issued.Cert, Key: issued.Key},
+		Number:     big.NewInt(1),
+		ThisUpdate: thisUpdate,
+		NextUpdate: nextUpdate,
+		// Empty entries — fresh CA has nothing revoked yet.
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &store.CRL{
+		IssuerCertID: certID,
+		CRLNumber:    1,
+		ThisUpdate:   thisUpdate,
+		NextUpdate:   nextUpdate,
+		DER:          der,
+	}, nil
 }
 
 // loadSigner fetches a CA's parsed cert and decrypted private key, returning

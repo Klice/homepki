@@ -73,14 +73,17 @@ func InsertCert(db *sql.DB, c *Cert, k *CertKey) error {
 	return nil
 }
 
-// IssueCertWithToken atomically inserts the cert + key bundle and marks the
-// supplied form token as used (with resultURL for replay redirects). Either
-// all three rows reach their final state, or none do.
+// IssueCertWithToken atomically inserts the cert + key bundle, optionally an
+// initial CRL row (per LIFECYCLE.md §6.2 — CAs get an empty CRL on issuance),
+// and marks the supplied form token as used. Either everything lands or
+// nothing does.
 //
 // resultURL is the URL the POST handler 303-redirects to on success; replays
-// of the same form_token return that same URL via MarkIdemTokenUsed +
+// of the same form_token return that URL via MarkIdemTokenUsed +
 // LookupIdemToken in the next request.
-func IssueCertWithToken(db *sql.DB, c *Cert, k *CertKey, formToken, resultURL string) error {
+//
+// initialCRL is nil for leaf issuance and non-nil for CA issuance.
+func IssueCertWithToken(db *sql.DB, c *Cert, k *CertKey, initialCRL *CRL, formToken, resultURL string) error {
 	if formToken == "" {
 		return errors.New("IssueCertWithToken: form token required")
 	}
@@ -91,6 +94,11 @@ func IssueCertWithToken(db *sql.DB, c *Cert, k *CertKey, formToken, resultURL st
 	defer func() { _ = tx.Rollback() }()
 	if err := insertCertTx(tx, c, k); err != nil {
 		return err
+	}
+	if initialCRL != nil {
+		if err := InsertCRL(tx, initialCRL); err != nil {
+			return fmt.Errorf("IssueCertWithToken: %w", err)
+		}
 	}
 	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
 		return fmt.Errorf("IssueCertWithToken: %w", err)

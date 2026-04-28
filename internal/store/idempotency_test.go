@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestCreateAndLookup_RoundTrip(t *testing.T) {
@@ -138,7 +139,7 @@ func TestIssueCertWithToken_AtomicSuccess(t *testing.T) {
 	c.ParentID = nil
 	k := sampleKey("issued-id")
 
-	if err := IssueCertWithToken(db, c, k, tok, "/certs/issued-id"); err != nil {
+	if err := IssueCertWithToken(db, c, k, nil, tok, "/certs/issued-id"); err != nil {
 		t.Fatalf("IssueCertWithToken: %v", err)
 	}
 
@@ -173,7 +174,7 @@ func TestIssueCertWithToken_RollsBackOnFKViolation(t *testing.T) {
 	c.ParentID = ptrStr("does-not-exist")
 	k := sampleKey("orphan")
 
-	if err := IssueCertWithToken(db, c, k, tok, "/x"); err == nil {
+	if err := IssueCertWithToken(db, c, k, nil, tok, "/x"); err == nil {
 		t.Error("expected FK violation error, got nil")
 	}
 	// All three rows must be absent.
@@ -192,6 +193,96 @@ func TestIssueCertWithToken_RollsBackOnFKViolation(t *testing.T) {
 	}
 }
 
+func TestIssueCertWithToken_WithInitialCRL(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := CreateIdemToken(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := sampleCert("ca-id")
+	c.Type = "root_ca"
+	c.IsCA = true
+	c.ParentID = nil
+	k := sampleKey("ca-id")
+
+	now := time.Now()
+	crl := &CRL{
+		IssuerCertID: "ca-id",
+		CRLNumber:    1,
+		ThisUpdate:   now,
+		NextUpdate:   now.Add(7 * 24 * time.Hour),
+		DER:          []byte{0xCA, 0xFE},
+	}
+
+	if err := IssueCertWithToken(db, c, k, crl, tok, "/certs/ca-id"); err != nil {
+		t.Fatalf("IssueCertWithToken: %v", err)
+	}
+
+	// All four states must be visible after commit.
+	if _, err := GetCert(db, "ca-id"); err != nil {
+		t.Errorf("cert row missing: %v", err)
+	}
+	if _, err := GetCertKey(db, "ca-id"); err != nil {
+		t.Errorf("key row missing: %v", err)
+	}
+	got, err := GetLatestCRL(db, "ca-id")
+	if err != nil {
+		t.Errorf("crl row missing: %v", err)
+	} else if got.CRLNumber != 1 {
+		t.Errorf("crl number: got %d, want 1", got.CRLNumber)
+	}
+	row, err := LookupIdemToken(db, tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.UsedAt == nil {
+		t.Error("token should have been marked used")
+	}
+}
+
+func TestIssueCertWithToken_InitialCRLRollsBackOnFailure(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := CreateIdemToken(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mismatched issuer_cert_id will fail the FK on crls.issuer_cert_id
+	// when the cert hasn't been inserted under that id.
+	c := sampleCert("real-ca")
+	c.Type = "root_ca"
+	c.IsCA = true
+	c.ParentID = nil
+	crl := &CRL{
+		IssuerCertID: "wrong-ca",
+		CRLNumber:    1,
+		ThisUpdate:   time.Now(),
+		NextUpdate:   time.Now().Add(time.Hour),
+		DER:          []byte{0x00},
+	}
+	if err := IssueCertWithToken(db, c, sampleKey("real-ca"), crl, tok, "/x"); err == nil {
+		t.Fatal("expected FK violation, got nil")
+	}
+	// Cert, key, and token must all be in their pre-call state.
+	if _, err := GetCert(db, "real-ca"); !errors.Is(err, ErrCertNotFound) {
+		t.Error("cert row should not have been written")
+	}
+	row, err := LookupIdemToken(db, tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.UsedAt != nil {
+		t.Error("token should not have been marked used after rollback")
+	}
+}
+
 func TestIssueCertWithToken_RejectsEmptyToken(t *testing.T) {
 	db := openTestDB(t)
 	if err := Migrate(db); err != nil {
@@ -200,7 +291,7 @@ func TestIssueCertWithToken_RejectsEmptyToken(t *testing.T) {
 	c := sampleCert("x")
 	c.Type = "root_ca"
 	c.ParentID = nil
-	if err := IssueCertWithToken(db, c, sampleKey("x"), "", "/x"); err == nil {
+	if err := IssueCertWithToken(db, c, sampleKey("x"), nil, "", "/x"); err == nil {
 		t.Error("expected error on empty form token")
 	}
 }

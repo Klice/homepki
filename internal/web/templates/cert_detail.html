@@ -80,8 +80,36 @@
     {{end}}
   </ol>
 
+  {{if and (ne .View.Status "revoked") (ne .View.Status "superseded")}}
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Revoke</h3>
+  <details>
+    <summary>Revoke this certificate</summary>
+    <form method="post" action="/certs/{{.View.ID}}/revoke" style="margin-top: 0.5rem;">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <label>Reason
+        <select name="reason" required>
+          <option value="0">unspecified</option>
+          <option value="1">key compromise</option>
+          {{if .View.IsCA}}<option value="2">CA compromise</option>{{end}}
+          <option value="3">affiliation changed</option>
+          <option value="4">superseded</option>
+          <option value="5">cessation of operation</option>
+          <option value="9">privilege withdrawn</option>
+          {{if .View.IsCA}}<option value="10">AA compromise</option>{{end}}
+        </select>
+      </label>
+      <button type="submit" class="contrast outline" style="margin-top: 0.5rem;">
+        Revoke
+      </button>
+      <small style="display: block; color: var(--pico-muted-color); margin-top: 0.5rem;">
+        Adds this cert to its issuer's CRL on the next regeneration. Revocation is permanent.
+      </small>
+    </form>
+  </details>
+  {{end}}
+
   <p style="color: var(--pico-muted-color); font-size: 0.8rem;">
-    Downloads, rotation, revocation, and deploy actions land in upcoming releases.
+    Downloads, rotation, and deploy actions land in upcoming releases.
   </p>
 </article>
 {{end}}
