@@ -87,6 +87,32 @@ Hot-path queries (cert list, single cert load, CRL fetch) are prepared
 once at startup and reused. Cold queries (issuance, migrations) use
 ad-hoc `db.Exec`/`db.Query`.
 
+### 3.4 SQL → Go via sqlc
+
+Hand-written queries live as `.sql` files under `internal/store/queries/`.
+A `make generate` step runs [`sqlc`](https://sqlc.dev) which reads those
+SQL files plus the migrations and produces typed Go in
+`internal/store/storedb/`. The generated package exposes a `Queries`
+struct with one method per query; per-package wrappers in
+`internal/store/` translate between sqlc's types and our domain types
+(handle JSON columns, map sentinels, etc.).
+
+Generated files are committed so `go build` works without `sqlc`
+installed. CI verifies the committed output matches the source SQL via
+`sqlc diff` — a stale checkin fails the build.
+
+When adding a query:
+
+1. Edit or add the relevant `internal/store/queries/*.sql` file.
+2. Run `make generate`.
+3. Commit both the `.sql` change and the regenerated `storedb/*.go`
+   files in the same commit.
+
+All non-migration SQL in this package goes through sqlc. Hand-written
+`db.Exec` / `db.QueryRow` calls outside `internal/store/storedb/` are
+limited to the migration runner itself (which boots before sqlc would
+have a schema to read).
+
 ---
 
 ## 4. Schema migrations

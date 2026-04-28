@@ -1,12 +1,14 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/Klice/homepki/internal/store/storedb"
 )
 
 // Cert mirrors a row in the certificates table. NULLable columns use
@@ -56,6 +58,10 @@ type CertKey struct {
 // ErrCertNotFound is returned by GetCert / GetCertKey when no row exists.
 var ErrCertNotFound = errors.New("cert not found")
 
+// ErrSupersedeNotActive is returned when the rotation combinator can't find
+// the old cert in 'active' state (e.g. it's already revoked or superseded).
+var ErrSupersedeNotActive = errors.New("supersede: old cert not found or not active")
+
 // InsertCert writes the cert and its key bundle in one transaction.
 // Either both rows are written or neither is.
 func InsertCert(db *sql.DB, c *Cert, k *CertKey) error {
@@ -73,9 +79,40 @@ func InsertCert(db *sql.DB, c *Cert, k *CertKey) error {
 	return nil
 }
 
-// ErrSupersedeNotActive is returned when the rotation combinator can't find
-// the old cert in 'active' state (e.g. it's already revoked or superseded).
-var ErrSupersedeNotActive = errors.New("supersede: old cert not found or not active")
+// IssueCertWithToken atomically inserts the cert + key bundle, optionally an
+// initial CRL row (per LIFECYCLE.md §6.2 — CAs get an empty CRL on issuance),
+// and marks the supplied form token as used.
+//
+// resultURL is the URL the POST handler 303-redirects to on success; replays
+// of the same form_token return that URL via MarkIdemTokenUsed +
+// LookupIdemToken in the next request.
+//
+// initialCRL is nil for leaf issuance and non-nil for CA issuance.
+func IssueCertWithToken(db *sql.DB, c *Cert, k *CertKey, initialCRL *CRL, formToken, resultURL string) error {
+	if formToken == "" {
+		return errors.New("IssueCertWithToken: form token required")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("IssueCertWithToken: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertCertTx(tx, c, k); err != nil {
+		return err
+	}
+	if initialCRL != nil {
+		if err := InsertCRL(tx, initialCRL); err != nil {
+			return fmt.Errorf("IssueCertWithToken: %w", err)
+		}
+	}
+	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
+		return fmt.Errorf("IssueCertWithToken: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("IssueCertWithToken: commit: %w", err)
+	}
+	return nil
+}
 
 // IssueRotationWithToken atomically inserts the new cert + key bundle (with
 // optional initial CRL for CA rotations), supersedes the old cert (status
@@ -86,8 +123,7 @@ var ErrSupersedeNotActive = errors.New("supersede: old cert not found or not act
 // rotation chain link is the caller's responsibility.
 //
 // Returns ErrSupersedeNotActive if oldID is not in 'active' state at commit
-// time (so a race-or-double-rotation surfaces as a clean error rather than
-// a silent supersede of an already-revoked cert).
+// time.
 func IssueRotationWithToken(db *sql.DB, newCert *Cert, newKey *CertKey, initialCRL *CRL, oldID, formToken, resultURL string) error {
 	if formToken == "" {
 		return errors.New("IssueRotationWithToken: form token required")
@@ -123,67 +159,28 @@ func IssueRotationWithToken(db *sql.DB, newCert *Cert, newKey *CertKey, initialC
 	return nil
 }
 
-// supersedeOldTx flips the old cert's status to superseded and links it
-// forward via replaced_by_id. Refuses to clobber a non-active row so that
-// rotating an already-revoked cert (or racing two rotations) errors out
-// cleanly.
-func supersedeOldTx(tx dbtx, oldID, newID string) error {
-	res, err := tx.Exec(
-		`UPDATE certificates
-		   SET status = 'superseded', replaced_by_id = ?
-		   WHERE id = ? AND status = 'active'`,
-		newID, oldID,
-	)
+// supersedeOldTx flips the old cert's status to superseded. Refuses to
+// clobber a non-active row so rotating an already-revoked cert errors out
+// cleanly with ErrSupersedeNotActive.
+func supersedeOldTx(tx sqlcDBTX, oldID, newID string) error {
+	id := newID
+	n, err := storedb.New(tx).SupersedeCert(context.Background(), storedb.SupersedeCertParams{
+		ReplacedByID: &id,
+		ID:           oldID,
+	})
 	if err != nil {
 		return fmt.Errorf("supersede: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	if n == 0 {
 		return ErrSupersedeNotActive
 	}
 	return nil
 }
 
-// IssueCertWithToken atomically inserts the cert + key bundle, optionally an
-// initial CRL row (per LIFECYCLE.md §6.2 — CAs get an empty CRL on issuance),
-// and marks the supplied form token as used. Either everything lands or
-// nothing does.
-//
-// resultURL is the URL the POST handler 303-redirects to on success; replays
-// of the same form_token return that URL via MarkIdemTokenUsed +
-// LookupIdemToken in the next request.
-//
-// initialCRL is nil for leaf issuance and non-nil for CA issuance.
-func IssueCertWithToken(db *sql.DB, c *Cert, k *CertKey, initialCRL *CRL, formToken, resultURL string) error {
-	if formToken == "" {
-		return errors.New("IssueCertWithToken: form token required")
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("IssueCertWithToken: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := insertCertTx(tx, c, k); err != nil {
-		return err
-	}
-	if initialCRL != nil {
-		if err := InsertCRL(tx, initialCRL); err != nil {
-			return fmt.Errorf("IssueCertWithToken: %w", err)
-		}
-	}
-	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
-		return fmt.Errorf("IssueCertWithToken: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("IssueCertWithToken: commit: %w", err)
-	}
-	return nil
-}
-
-// insertCertTx is the shared body of InsertCert / IssueCertWithToken. Operates
-// inside a caller-supplied transaction so combinators can compose multiple
-// writes atomically.
-func insertCertTx(tx dbtx, c *Cert, k *CertKey) error {
+// insertCertTx is the shared body of InsertCert / IssueCertWithToken /
+// IssueRotationWithToken. Operates inside a caller-supplied transaction so
+// combinators can compose multiple writes atomically.
+func insertCertTx(tx sqlcDBTX, c *Cert, k *CertKey) error {
 	if c == nil || k == nil {
 		return errors.New("insertCertTx: cert and key required")
 	}
@@ -194,137 +191,138 @@ func insertCertTx(tx dbtx, c *Cert, k *CertKey) error {
 		return fmt.Errorf("insertCertTx: cert.ID %q != key.CertID %q", c.ID, k.CertID)
 	}
 
-	sanDNSJSON, _ := json.Marshal(strSliceOrEmpty(c.SANDNS))
-	sanIPsJSON, _ := json.Marshal(strSliceOrEmpty(c.SANIPs))
-	keyUsageJSON, _ := json.Marshal(strSliceOrEmpty(c.KeyUsage))
-	extKeyUsageJSON, _ := json.Marshal(strSliceOrEmpty(c.ExtKeyUsage))
-
-	if _, err := tx.Exec(`
-		INSERT INTO certificates (
-			id, type, parent_id, serial_number,
-			subject_cn, subject_o, subject_ou, subject_l, subject_st, subject_c,
-			san_dns, san_ip, is_ca, path_len_constraint,
-			key_algo, key_algo_params, key_usage, ext_key_usage,
-			not_before, not_after, der_cert, fingerprint_sha256,
-			status, replaces_id
-		) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?)`,
-		c.ID, c.Type, c.ParentID, c.SerialNumber,
-		c.SubjectCN, nullString(c.SubjectO), nullString(c.SubjectOU), nullString(c.SubjectL), nullString(c.SubjectST), nullString(c.SubjectC),
-		sanDNSJSON, sanIPsJSON, c.IsCA, c.PathLen,
-		c.KeyAlgo, nullString(c.KeyAlgoParams), keyUsageJSON, extKeyUsageJSON,
-		c.NotBefore.UTC(), c.NotAfter.UTC(), c.DERCert, c.FingerprintSHA256,
-		nonEmptyOrDefault(c.Status, "active"), c.ReplacesID,
-	); err != nil {
+	q := storedb.New(tx)
+	if err := q.InsertCertificate(context.Background(), certInsertParams(c)); err != nil {
 		return fmt.Errorf("insertCertTx: insert certificates: %w", err)
 	}
-
-	if _, err := tx.Exec(`
-		INSERT INTO cert_keys (cert_id, kek_tier, wrapped_dek, dek_nonce, cipher_nonce, ciphertext)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		k.CertID, nonEmptyOrDefault(k.KEKTier, "main"),
-		k.WrappedDEK, k.DEKNonce, k.CipherNonce, k.Ciphertext,
-	); err != nil {
+	if err := q.InsertCertKey(context.Background(), storedb.InsertCertKeyParams{
+		CertID:      k.CertID,
+		KekTier:     nonEmptyOrDefault(k.KEKTier, "main"),
+		WrappedDek:  k.WrappedDEK,
+		DekNonce:    k.DEKNonce,
+		CipherNonce: k.CipherNonce,
+		Ciphertext:  k.Ciphertext,
+	}); err != nil {
 		return fmt.Errorf("insertCertTx: insert cert_keys: %w", err)
 	}
 	return nil
 }
 
-// GetCert loads a cert row by id. Returns ErrCertNotFound if missing.
-func GetCert(db *sql.DB, id string) (*Cert, error) {
-	var c Cert
-	var sanDNSJSON, sanIPsJSON, keyUsageJSON, extKeyUsageJSON []byte
-	var subjectO, subjectOU, subjectL, subjectST, subjectC sql.NullString
-	var keyAlgoParams sql.NullString
-	var pathLen sql.NullInt64
-	var revokedAt sql.NullTime
-	var revocationReason sql.NullInt64
-	var replacesID, replacedByID sql.NullString
-	var parentID sql.NullString
+// certInsertParams marshals our Cert into the sqlc-generated params struct.
+// JSON columns are encoded here; nil-or-empty conversions for NULLable
+// strings happen via nilIfEmpty.
+func certInsertParams(c *Cert) storedb.InsertCertificateParams {
+	sanDNS, _ := json.Marshal(strSliceOrEmpty(c.SANDNS))
+	sanIP, _ := json.Marshal(strSliceOrEmpty(c.SANIPs))
+	keyUsage, _ := json.Marshal(strSliceOrEmpty(c.KeyUsage))
+	extKeyUsage, _ := json.Marshal(strSliceOrEmpty(c.ExtKeyUsage))
 
-	err := db.QueryRow(`
-		SELECT id, type, parent_id, serial_number,
-		       subject_cn, subject_o, subject_ou, subject_l, subject_st, subject_c,
-		       san_dns, san_ip, is_ca, path_len_constraint,
-		       key_algo, key_algo_params, key_usage, ext_key_usage,
-		       not_before, not_after, der_cert, fingerprint_sha256,
-		       status, revoked_at, revocation_reason, replaces_id, replaced_by_id, created_at
-		FROM certificates WHERE id = ?`, id).Scan(
-		&c.ID, &c.Type, &parentID, &c.SerialNumber,
-		&c.SubjectCN, &subjectO, &subjectOU, &subjectL, &subjectST, &subjectC,
-		&sanDNSJSON, &sanIPsJSON, &c.IsCA, &pathLen,
-		&c.KeyAlgo, &keyAlgoParams, &keyUsageJSON, &extKeyUsageJSON,
-		&c.NotBefore, &c.NotAfter, &c.DERCert, &c.FingerprintSHA256,
-		&c.Status, &revokedAt, &revocationReason, &replacesID, &replacedByID, &c.CreatedAt,
-	)
+	return storedb.InsertCertificateParams{
+		ID:                c.ID,
+		Type:              c.Type,
+		ParentID:          c.ParentID,
+		SerialNumber:      c.SerialNumber,
+		SubjectCn:         c.SubjectCN,
+		SubjectO:          nilIfEmpty(c.SubjectO),
+		SubjectOu:         nilIfEmpty(c.SubjectOU),
+		SubjectL:          nilIfEmpty(c.SubjectL),
+		SubjectSt:         nilIfEmpty(c.SubjectST),
+		SubjectC:          nilIfEmpty(c.SubjectC),
+		SanDns:            string(sanDNS),
+		SanIp:             string(sanIP),
+		IsCa:              boolToInt(c.IsCA),
+		PathLenConstraint: intPtrToInt64Ptr(c.PathLen),
+		KeyAlgo:           c.KeyAlgo,
+		KeyAlgoParams:     nilIfEmpty(c.KeyAlgoParams),
+		KeyUsage:          string(keyUsage),
+		ExtKeyUsage:       string(extKeyUsage),
+		NotBefore:         c.NotBefore.UTC(),
+		NotAfter:          c.NotAfter.UTC(),
+		DerCert:           c.DERCert,
+		FingerprintSha256: c.FingerprintSHA256,
+		Status:            nonEmptyOrDefault(c.Status, "active"),
+		ReplacesID:        c.ReplacesID,
+	}
+}
+
+// GetCert loads a cert row by id. Returns ErrCertNotFound if missing.
+func GetCert(db sqlcDBTX, id string) (*Cert, error) {
+	row, err := storedb.New(db).GetCertificate(context.Background(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCertNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetCert: %w", err)
 	}
+	return certFromRow(row)
+}
 
-	if parentID.Valid {
-		v := parentID.String
-		c.ParentID = &v
+// certFromRow converts a sqlc-generated Certificate to our domain Cert,
+// unmarshalling JSON columns and dereffing nullable pointers.
+func certFromRow(row storedb.Certificate) (*Cert, error) {
+	c := &Cert{
+		ID:                row.ID,
+		Type:              row.Type,
+		ParentID:          row.ParentID,
+		SerialNumber:      row.SerialNumber,
+		SubjectCN:         row.SubjectCn,
+		SubjectO:          derefOrEmpty(row.SubjectO),
+		SubjectOU:         derefOrEmpty(row.SubjectOu),
+		SubjectL:          derefOrEmpty(row.SubjectL),
+		SubjectST:         derefOrEmpty(row.SubjectSt),
+		SubjectC:          derefOrEmpty(row.SubjectC),
+		IsCA:              row.IsCa != 0,
+		PathLen:           int64PtrToIntPtr(row.PathLenConstraint),
+		KeyAlgo:           row.KeyAlgo,
+		KeyAlgoParams:     derefOrEmpty(row.KeyAlgoParams),
+		NotBefore:         row.NotBefore,
+		NotAfter:          row.NotAfter,
+		DERCert:           row.DerCert,
+		FingerprintSHA256: row.FingerprintSha256,
+		Status:            row.Status,
+		RevokedAt:         row.RevokedAt,
+		RevocationReason:  int64PtrToIntPtr(row.RevocationReason),
+		ReplacesID:        row.ReplacesID,
+		ReplacedByID:      row.ReplacedByID,
+		CreatedAt:         row.CreatedAt,
 	}
-	c.SubjectO = subjectO.String
-	c.SubjectOU = subjectOU.String
-	c.SubjectL = subjectL.String
-	c.SubjectST = subjectST.String
-	c.SubjectC = subjectC.String
-	c.KeyAlgoParams = keyAlgoParams.String
-	if pathLen.Valid {
-		v := int(pathLen.Int64)
-		c.PathLen = &v
-	}
-	if revokedAt.Valid {
-		v := revokedAt.Time
-		c.RevokedAt = &v
-	}
-	if revocationReason.Valid {
-		v := int(revocationReason.Int64)
-		c.RevocationReason = &v
-	}
-	if replacesID.Valid {
-		v := replacesID.String
-		c.ReplacesID = &v
-	}
-	if replacedByID.Valid {
-		v := replacedByID.String
-		c.ReplacedByID = &v
-	}
-
-	if err := json.Unmarshal(sanDNSJSON, &c.SANDNS); err != nil {
+	if err := json.Unmarshal([]byte(row.SanDns), &c.SANDNS); err != nil {
 		return nil, fmt.Errorf("GetCert: unmarshal san_dns: %w", err)
 	}
-	if err := json.Unmarshal(sanIPsJSON, &c.SANIPs); err != nil {
+	if err := json.Unmarshal([]byte(row.SanIp), &c.SANIPs); err != nil {
 		return nil, fmt.Errorf("GetCert: unmarshal san_ip: %w", err)
 	}
-	if err := json.Unmarshal(keyUsageJSON, &c.KeyUsage); err != nil {
+	if err := json.Unmarshal([]byte(row.KeyUsage), &c.KeyUsage); err != nil {
 		return nil, fmt.Errorf("GetCert: unmarshal key_usage: %w", err)
 	}
-	if err := json.Unmarshal(extKeyUsageJSON, &c.ExtKeyUsage); err != nil {
+	if err := json.Unmarshal([]byte(row.ExtKeyUsage), &c.ExtKeyUsage); err != nil {
 		return nil, fmt.Errorf("GetCert: unmarshal ext_key_usage: %w", err)
 	}
-	return &c, nil
+	return c, nil
 }
 
 // ListCAs returns every root_ca and intermediate_ca row, newest first.
-func ListCAs(db *sql.DB) ([]*Cert, error) {
-	return listByTypes(db, []string{"root_ca", "intermediate_ca"})
+func ListCAs(db sqlcDBTX) ([]*Cert, error) {
+	ids, err := storedb.New(db).ListCAs(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("ListCAs: %w", err)
+	}
+	return loadByIDs(db, ids)
 }
 
 // ListLeaves returns every leaf row, newest first.
-func ListLeaves(db *sql.DB) ([]*Cert, error) {
-	return listByTypes(db, []string{"leaf"})
+func ListLeaves(db sqlcDBTX) ([]*Cert, error) {
+	ids, err := storedb.New(db).ListLeaves(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("ListLeaves: %w", err)
+	}
+	return loadByIDs(db, ids)
 }
 
 // GetChain returns the cert and all its ancestors up to the self-signed
-// root, in self-first order ([self, parent, ..., root]). Returns
-// ErrCertNotFound if id does not exist. Cycle-safe: stops if a cert is
-// ever revisited (the FK shouldn't allow cycles, but the loop is
-// defensive).
-func GetChain(db *sql.DB, id string) ([]*Cert, error) {
+// root, in self-first order ([self, parent, ..., root]). Cycle-safe via a
+// visited set.
+func GetChain(db sqlcDBTX, id string) ([]*Cert, error) {
 	chain := []*Cert{}
 	seen := map[string]bool{}
 	current := id
@@ -346,36 +344,7 @@ func GetChain(db *sql.DB, id string) ([]*Cert, error) {
 	return chain, nil
 }
 
-func listByTypes(db *sql.DB, types []string) ([]*Cert, error) {
-	if len(types) == 0 {
-		return nil, nil
-	}
-	placeholders := strings.Repeat("?,", len(types))
-	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]any, len(types))
-	for i, t := range types {
-		args[i] = t
-	}
-	rows, err := db.Query(`
-		SELECT id FROM certificates
-		WHERE type IN (`+placeholders+`)
-		ORDER BY created_at DESC, id DESC`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("listByTypes: %w", err)
-	}
-	defer rows.Close()
-
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
+func loadByIDs(db sqlcDBTX, ids []string) ([]*Cert, error) {
 	out := make([]*Cert, 0, len(ids))
 	for _, id := range ids {
 		c, err := GetCert(db, id)
@@ -389,23 +358,25 @@ func listByTypes(db *sql.DB, types []string) ([]*Cert, error) {
 
 // GetCertKey loads the cert_keys row for id. Returns ErrCertNotFound if
 // missing — the caller should treat "key gone" the same as "cert gone".
-func GetCertKey(db *sql.DB, id string) (*CertKey, error) {
-	var k CertKey
-	err := db.QueryRow(`
-		SELECT cert_id, kek_tier, wrapped_dek, dek_nonce, cipher_nonce, ciphertext
-		FROM cert_keys WHERE cert_id = ?`, id).Scan(
-		&k.CertID, &k.KEKTier, &k.WrappedDEK, &k.DEKNonce, &k.CipherNonce, &k.Ciphertext,
-	)
+func GetCertKey(db sqlcDBTX, id string) (*CertKey, error) {
+	row, err := storedb.New(db).GetCertKeyByID(context.Background(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCertNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetCertKey: %w", err)
 	}
-	return &k, nil
+	return &CertKey{
+		CertID:      row.CertID,
+		KEKTier:     row.KekTier,
+		WrappedDEK:  row.WrappedDek,
+		DEKNonce:    row.DekNonce,
+		CipherNonce: row.CipherNonce,
+		Ciphertext:  row.Ciphertext,
+	}, nil
 }
 
-// ---- helpers ----
+// ---- type-translation helpers ----
 
 func strSliceOrEmpty(s []string) []string {
 	if s == nil {
@@ -414,11 +385,18 @@ func strSliceOrEmpty(s []string) []string {
 	return s
 }
 
-func nullString(s string) any {
+func nilIfEmpty(s string) *string {
 	if s == "" {
 		return nil
 	}
-	return s
+	return &s
+}
+
+func derefOrEmpty(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func nonEmptyOrDefault(s, def string) string {
@@ -426,4 +404,27 @@ func nonEmptyOrDefault(s, def string) string {
 		return def
 	}
 	return s
+}
+
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func intPtrToInt64Ptr(p *int) *int64 {
+	if p == nil {
+		return nil
+	}
+	v := int64(*p)
+	return &v
+}
+
+func int64PtrToIntPtr(p *int64) *int {
+	if p == nil {
+		return nil
+	}
+	v := int(*p)
+	return &v
 }
