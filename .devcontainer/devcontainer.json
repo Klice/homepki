@@ -33,7 +33,7 @@
     "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached,readonly"
   ],
-  "postCreateCommand": "sudo chown -R vscode:vscode /go /home/vscode/.cache/go-build && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go install github.com/air-verse/air@latest",
+  "postCreateCommand": "sudo chown -R vscode:vscode /go /home/vscode/.cache/go-build && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go install github.com/air-verse/air@latest && go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest",
   "postStartCommand": "test -f go.mod && go mod download || true",
   "customizations": {
     "vscode": {

@@ -1,0 +1,23 @@
+version: "2"
+
+# sqlc generates typed Go from SQL. Generated files are committed under
+# internal/store/storedb so `go build` works without running `sqlc
+# generate` first; CI verifies the committed output matches the SQL via
+# `sqlc diff`.
+#
+# To regenerate after changing schema or queries:
+#   make generate
+sql:
+  - engine: "sqlite"
+    schema: "internal/store/migrations"
+    queries: "internal/store/queries"
+    gen:
+      go:
+        package: "storedb"
+        out: "internal/store/storedb"
+        sql_package: "database/sql"
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        emit_json_tags: false
+        emit_interface: false
+        emit_exact_table_names: false

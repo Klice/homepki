@@ -42,6 +42,14 @@ fmt: ## format Go sources
 tidy: ## go mod tidy
 	go mod tidy
 
+.PHONY: generate
+generate: ## run sqlc to regenerate internal/store/storedb (commit the result)
+	sqlc generate
+
+.PHONY: generate-check
+generate-check: ## fail if generated code is stale relative to schema/queries
+	sqlc diff
+
 .PHONY: lint
 lint: ## golangci-lint (devcontainer has it pre-installed)
 	golangci-lint run
