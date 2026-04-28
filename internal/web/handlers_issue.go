@@ -28,9 +28,20 @@ const (
 // issueViewData is the data for all three issue forms; the template chooses
 // which fields to render based on which struct fields are populated.
 type issueViewData struct {
-	CSRFToken    string
-	FormToken    string
-	Error        string
+	CSRFToken string
+	FormToken string
+	Error     string
+
+	// FormAction is the URL the form posts to. Issue handlers set this to
+	// /certs/new/{type}; rotate handlers set it to /certs/{id}/rotate.
+	FormAction string
+	// PageTitle / PageHeading let the rotate flow re-use the same templates
+	// with a different on-page label.
+	PageTitle   string
+	PageHeading string
+	// ParentLocked, when true, disables the parent-CA picker (rotation
+	// keeps the same parent as the cert being rotated).
+	ParentLocked bool
 
 	// Form values, echoed back to the user on validation error.
 	SubjectCN     string
@@ -70,6 +81,9 @@ func (s *Server) handleIssueRootGet(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "issue_root", issueViewData{
 		CSRFToken:     CSRFToken(r),
 		FormToken:     tok,
+		FormAction:    "/certs/new/root",
+		PageTitle:     "issue root CA",
+		PageHeading:   "Issue root CA",
 		KeyAlgo:       defaultRootKeyAlgo,
 		KeyAlgoParams: defaultRootKeyAlgoParams,
 		ValidityDays:  defaultRootValidityDays,
@@ -141,6 +155,9 @@ func (s *Server) handleIssueIntermediateGet(w http.ResponseWriter, r *http.Reque
 	s.render(w, "issue_intermediate", issueViewData{
 		CSRFToken:     CSRFToken(r),
 		FormToken:     tok,
+		FormAction:    "/certs/new/intermediate",
+		PageTitle:     "issue intermediate CA",
+		PageHeading:   "Issue intermediate CA",
 		KeyAlgo:       defaultIntKeyAlgo,
 		KeyAlgoParams: defaultIntKeyAlgoParams,
 		ValidityDays:  defaultIntValidityDays,
@@ -235,6 +252,9 @@ func (s *Server) handleIssueLeafGet(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "issue_leaf", issueViewData{
 		CSRFToken:     CSRFToken(r),
 		FormToken:     tok,
+		FormAction:    "/certs/new/leaf",
+		PageTitle:     "issue leaf cert",
+		PageHeading:   "Issue leaf certificate",
 		KeyAlgo:       defaultLeafKeyAlgo,
 		KeyAlgoParams: defaultLeafKeyAlgoParams,
 		ValidityDays:  defaultLeafValidityDays,
@@ -321,9 +341,11 @@ func (s *Server) handleIssueLeafPost(w http.ResponseWriter, r *http.Request) {
 // ============== shared helpers ==============
 
 // readIssueForm pulls all form fields the issue handlers care about into one
-// struct. Doesn't validate anything yet.
+// struct. FormAction is set to the request path so error re-renders post
+// back to the same handler. Doesn't validate field contents.
 func readIssueForm(r *http.Request) issueViewData {
 	d := issueViewData{
+		FormAction:    r.URL.Path,
 		SubjectCN:     strings.TrimSpace(r.PostForm.Get("subject_cn")),
 		SubjectO:      strings.TrimSpace(r.PostForm.Get("subject_o")),
 		SubjectOU:     strings.TrimSpace(r.PostForm.Get("subject_ou")),

@@ -1,4 +1,4 @@
-{{define "title"}}homepki — issue intermediate CA{{end}}
+{{define "title"}}homepki — {{.PageTitle}}{{end}}
 
 {{define "header_actions"}}
 <nav>
@@ -11,7 +11,7 @@
 
 {{define "content"}}
 <article>
-  <header><h2 style="margin-bottom: 0.25rem;">Issue intermediate CA</h2></header>
+  <header><h2 style="margin-bottom: 0.25rem;">{{.PageHeading}}</h2></header>
   <p><small>Intermediates are signed by a root and host a CRL distribution point. They typically live for ~5 years.</small></p>
 
   {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
@@ -19,17 +19,18 @@
   {{if not .ParentChoices}}
     <p><strong>No root CAs available.</strong> <a href="/certs/new/root">Issue one first.</a></p>
   {{else}}
-  <form method="post" action="/certs/new/intermediate">
+  <form method="post" action="{{.FormAction}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <input type="hidden" name="form_token" value="{{.FormToken}}">
 
     <label>Parent root CA (required)
-      <select name="parent_id" required>
+      <select name="parent_id" required {{if .ParentLocked}}disabled{{end}}>
         <option value="">— pick a root —</option>
         {{range .ParentChoices}}
         <option value="{{.ID}}" {{if eq $.ParentID .ID}}selected{{end}}>{{.CN}}</option>
         {{end}}
       </select>
+      {{if .ParentLocked}}<input type="hidden" name="parent_id" value="{{.ParentID}}">{{end}}
     </label>
 
     <fieldset>

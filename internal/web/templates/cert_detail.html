@@ -80,6 +80,17 @@
     {{end}}
   </ol>
 
+  {{if eq .View.Status "active"}}
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Rotate</h3>
+  <p>
+    <a href="/certs/{{.View.ID}}/rotate" role="button" class="secondary">Rotate this certificate</a>
+    <small style="display: block; color: var(--pico-muted-color); margin-top: 0.5rem;">
+      Issues a successor and marks this one superseded. Same parent, same chain;
+      a new keypair is generated.
+    </small>
+  </p>
+  {{end}}
+
   {{if and (ne .View.Status "revoked") (ne .View.Status "superseded")}}
   <h3 style="font-size: 0.95rem; font-weight: 500;">Revoke</h3>
   <details>

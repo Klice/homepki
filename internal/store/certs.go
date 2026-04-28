@@ -73,6 +73,77 @@ func InsertCert(db *sql.DB, c *Cert, k *CertKey) error {
 	return nil
 }
 
+// ErrSupersedeNotActive is returned when the rotation combinator can't find
+// the old cert in 'active' state (e.g. it's already revoked or superseded).
+var ErrSupersedeNotActive = errors.New("supersede: old cert not found or not active")
+
+// IssueRotationWithToken atomically inserts the new cert + key bundle (with
+// optional initial CRL for CA rotations), supersedes the old cert (status
+// active → superseded, replaced_by_id → newCert.ID), and marks the form
+// token used. Either everything lands or nothing does.
+//
+// newCert.ReplacesID must already be set to oldID by the caller — the
+// rotation chain link is the caller's responsibility.
+//
+// Returns ErrSupersedeNotActive if oldID is not in 'active' state at commit
+// time (so a race-or-double-rotation surfaces as a clean error rather than
+// a silent supersede of an already-revoked cert).
+func IssueRotationWithToken(db *sql.DB, newCert *Cert, newKey *CertKey, initialCRL *CRL, oldID, formToken, resultURL string) error {
+	if formToken == "" {
+		return errors.New("IssueRotationWithToken: form token required")
+	}
+	if oldID == "" {
+		return errors.New("IssueRotationWithToken: oldID required")
+	}
+	if newCert == nil || newCert.ReplacesID == nil || *newCert.ReplacesID != oldID {
+		return errors.New("IssueRotationWithToken: newCert.ReplacesID must equal oldID")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("IssueRotationWithToken: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertCertTx(tx, newCert, newKey); err != nil {
+		return err
+	}
+	if initialCRL != nil {
+		if err := InsertCRL(tx, initialCRL); err != nil {
+			return fmt.Errorf("IssueRotationWithToken: %w", err)
+		}
+	}
+	if err := supersedeOldTx(tx, oldID, newCert.ID); err != nil {
+		return err
+	}
+	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
+		return fmt.Errorf("IssueRotationWithToken: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("IssueRotationWithToken: commit: %w", err)
+	}
+	return nil
+}
+
+// supersedeOldTx flips the old cert's status to superseded and links it
+// forward via replaced_by_id. Refuses to clobber a non-active row so that
+// rotating an already-revoked cert (or racing two rotations) errors out
+// cleanly.
+func supersedeOldTx(tx dbtx, oldID, newID string) error {
+	res, err := tx.Exec(
+		`UPDATE certificates
+		   SET status = 'superseded', replaced_by_id = ?
+		   WHERE id = ? AND status = 'active'`,
+		newID, oldID,
+	)
+	if err != nil {
+		return fmt.Errorf("supersede: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrSupersedeNotActive
+	}
+	return nil
+}
+
 // IssueCertWithToken atomically inserts the cert + key bundle, optionally an
 // initial CRL row (per LIFECYCLE.md §6.2 — CAs get an empty CRL on issuance),
 // and marks the supplied form token as used. Either everything lands or
