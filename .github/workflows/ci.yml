@@ -26,6 +26,12 @@ jobs:
       - name: verify go.mod / go.sum are tidy
         run: go mod tidy -diff
 
+      - name: install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
+      - name: verify generated SQL code is up to date
+        run: sqlc diff
+
       - name: vet
         run: go vet ./...
 

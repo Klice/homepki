@@ -1,10 +1,13 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/Klice/homepki/internal/store/storedb"
 )
 
 // CRL mirrors a row in the crls table.
@@ -23,7 +26,7 @@ type CRL struct {
 var ErrCRLNotFound = errors.New("crl not found")
 
 // InsertCRL writes a new CRL row.
-func InsertCRL(db dbtx, c *CRL) error {
+func InsertCRL(db sqlcDBTX, c *CRL) error {
 	if c == nil {
 		return errors.New("InsertCRL: nil")
 	}
@@ -36,11 +39,14 @@ func InsertCRL(db dbtx, c *CRL) error {
 	if len(c.DER) == 0 {
 		return errors.New("InsertCRL: DER required")
 	}
-	_, err := db.Exec(
-		`INSERT INTO crls (issuer_cert_id, crl_number, this_update, next_update, der, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		c.IssuerCertID, c.CRLNumber, c.ThisUpdate.UTC(), c.NextUpdate.UTC(), c.DER, time.Now().UTC(),
-	)
+	err := storedb.New(db).InsertCRL(context.Background(), storedb.InsertCRLParams{
+		IssuerCertID: c.IssuerCertID,
+		CrlNumber:    c.CRLNumber,
+		ThisUpdate:   c.ThisUpdate.UTC(),
+		NextUpdate:   c.NextUpdate.UTC(),
+		Der:          c.DER,
+		UpdatedAt:    time.Now().UTC(),
+	})
 	if err != nil {
 		return fmt.Errorf("InsertCRL: %w", err)
 	}
@@ -49,77 +55,65 @@ func InsertCRL(db dbtx, c *CRL) error {
 
 // GetLatestCRL returns the row with the highest crl_number for issuerID.
 // Returns ErrCRLNotFound if no rows exist.
-func GetLatestCRL(db dbtx, issuerID string) (*CRL, error) {
+func GetLatestCRL(db sqlcDBTX, issuerID string) (*CRL, error) {
 	if issuerID == "" {
 		return nil, ErrCRLNotFound
 	}
-	var c CRL
-	err := db.QueryRow(
-		`SELECT issuer_cert_id, crl_number, this_update, next_update, der, updated_at
-		 FROM crls
-		 WHERE issuer_cert_id = ?
-		 ORDER BY crl_number DESC
-		 LIMIT 1`,
-		issuerID,
-	).Scan(&c.IssuerCertID, &c.CRLNumber, &c.ThisUpdate, &c.NextUpdate, &c.DER, &c.UpdatedAt)
+	row, err := storedb.New(db).GetLatestCRL(context.Background(), issuerID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCRLNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetLatestCRL: %w", err)
 	}
-	return &c, nil
+	return &CRL{
+		IssuerCertID: row.IssuerCertID,
+		CRLNumber:    row.CrlNumber,
+		ThisUpdate:   row.ThisUpdate,
+		NextUpdate:   row.NextUpdate,
+		DER:          row.Der,
+		UpdatedAt:    row.UpdatedAt,
+	}, nil
 }
 
 // NextCRLNumber returns one more than the highest crl_number for issuerID,
 // or 1 if no CRLs exist yet. Strict monotonicity per LIFECYCLE.md §6.4.
-func NextCRLNumber(db dbtx, issuerID string) (int64, error) {
-	var n sql.NullInt64
-	err := db.QueryRow(
-		`SELECT MAX(crl_number) FROM crls WHERE issuer_cert_id = ?`,
-		issuerID,
-	).Scan(&n)
+func NextCRLNumber(db sqlcDBTX, issuerID string) (int64, error) {
+	max, err := storedb.New(db).NextCRLNumber(context.Background(), issuerID)
 	if err != nil {
 		return 0, fmt.Errorf("NextCRLNumber: %w", err)
 	}
-	if !n.Valid {
+	// MAX() returns NULL → interface{} nil → sqlc emits interface{}; we get
+	// 0 from the type-assertion fallback path. Either way, "no rows" → 1.
+	switch v := max.(type) {
+	case int64:
+		return v + 1, nil
+	case nil:
 		return 1, nil
+	default:
+		return 0, fmt.Errorf("NextCRLNumber: unexpected MAX type %T", v)
 	}
-	return n.Int64 + 1, nil
 }
 
 // ListRevokedChildren returns the (serial, revocation_time, reason_code)
 // triples for every cert that names issuerID as parent and has status
-// 'revoked'. Per LIFECYCLE.md §5.5, expired certs are filtered out (no
-// point listing them on a CRL clients won't accept anyway).
-func ListRevokedChildren(db dbtx, issuerID string) ([]RevokedChild, error) {
-	rows, err := db.Query(
-		`SELECT serial_number, revoked_at, COALESCE(revocation_reason, 0)
-		 FROM certificates
-		 WHERE parent_id = ?
-		   AND status = 'revoked'
-		   AND not_after > datetime('now')
-		 ORDER BY revoked_at`,
-		issuerID,
-	)
+// 'revoked'. Per LIFECYCLE.md §5.5, expired certs are filtered out.
+func ListRevokedChildren(db sqlcDBTX, issuerID string) ([]RevokedChild, error) {
+	id := issuerID
+	rows, err := storedb.New(db).ListRevokedChildren(context.Background(), &id)
 	if err != nil {
 		return nil, fmt.Errorf("ListRevokedChildren: %w", err)
 	}
-	defer rows.Close()
-	var out []RevokedChild
-	for rows.Next() {
-		var c RevokedChild
-		var revokedAt sql.NullTime
-		if err := rows.Scan(&c.SerialNumber, &revokedAt, &c.ReasonCode); err != nil {
-			return nil, err
+	out := make([]RevokedChild, 0, len(rows))
+	for _, r := range rows {
+		c := RevokedChild{
+			SerialNumber: r.SerialNumber,
+			ReasonCode:   int(r.ReasonCode),
 		}
-		if revokedAt.Valid {
-			c.RevokedAt = revokedAt.Time
+		if r.RevokedAt != nil {
+			c.RevokedAt = *r.RevokedAt
 		}
 		out = append(out, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return out, nil
 }
@@ -136,16 +130,16 @@ type RevokedChild struct {
 // affected — 0 means the cert was already revoked (or didn't exist), 1
 // means we just transitioned it. Used by the revoke handler to detect
 // "already revoked" for ensure-state semantics per API.md §6.6.
-func MarkRevoked(db dbtx, certID string, reason int, when time.Time) (int, error) {
-	res, err := db.Exec(
-		`UPDATE certificates
-		   SET status = 'revoked', revoked_at = ?, revocation_reason = ?
-		   WHERE id = ? AND status != 'revoked'`,
-		when.UTC(), reason, certID,
-	)
+func MarkRevoked(db sqlcDBTX, certID string, reason int, when time.Time) (int, error) {
+	revokedAt := when.UTC()
+	r := int64(reason)
+	n, err := storedb.New(db).MarkCertRevoked(context.Background(), storedb.MarkCertRevokedParams{
+		RevokedAt:        &revokedAt,
+		RevocationReason: &r,
+		ID:               certID,
+	})
 	if err != nil {
 		return 0, fmt.Errorf("MarkRevoked: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	return int(n), nil
 }

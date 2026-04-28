@@ -87,6 +87,19 @@ Hot-path queries (cert list, single cert load, CRL fetch) are prepared
 once at startup and reused. Cold queries (issuance, migrations) use
 ad-hoc `db.Exec`/`db.Query`.
 
+### 3.4 SQL → Go via sqlc
+
+Queries live as `.sql` files under `internal/store/queries/` with
+[sqlc](https://sqlc.dev) annotations. The generator produces typed Go
+in `internal/store/storedb/` (committed). Per-table wrappers in
+`internal/store/` translate between the generated row types and the
+package's domain types — JSON columns, INTEGER↔bool, nullable
+conversions, sentinel errors.
+
+The schema migration runner is the one exception: it bootstraps the
+`schema_migrations` table itself and runs arbitrary migration DDL,
+neither of which sqlc can know about at build time.
+
 ---
 
 ## 4. Schema migrations
