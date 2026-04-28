@@ -187,6 +187,13 @@ func (s *Server) handleRotatePost(w http.ResponseWriter, r *http.Request) {
 		internalServerError(w, "rotate-post: persist", err)
 		return
 	}
+	// LIFECYCLE.md §4.4: targets with auto_on_rotate=1 run inline against
+	// the freshly-issued cert. Per-target failures are recorded on the row
+	// and don't roll back the rotation; the redirect lands on the new cert
+	// where statuses are visible.
+	if newCert, err := store.GetCert(s.db, newID); err == nil {
+		s.runAutoOnRotateTargets(r, newCert)
+	}
 	http.Redirect(w, r, "/certs/"+newID, http.StatusSeeOther)
 }
 

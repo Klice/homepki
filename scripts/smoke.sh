@@ -300,6 +300,112 @@ test_bundle_p12() {
     assert_eq "intermediate p12 → 404" "${non_status}" "404"
 }
 
+test_deploy() {
+    echo "==> Deploy: create + run + edit + delete"
+    local out_dir="${WORK_DIR}/deploy-out"
+    mkdir -p "${out_dir}"
+
+    local cert_path="${out_dir}/leaf.crt"
+    local key_path="${out_dir}/leaf.key"
+    local chain_path="${out_dir}/leaf-fullchain.crt"
+    local flag="${out_dir}/post-ran"
+
+    # Create a deploy target via the form-token gated endpoint.
+    local html="${WORK_DIR}/deploy-new.html"
+    get_page "/certs/${LEAF_ID}/deploy/new" "${html}"
+    local csrf form_token status loc
+    csrf=$(extract_attr csrf_token "${html}")
+    form_token=$(extract_attr form_token "${html}")
+    post_form "/certs/${LEAF_ID}/deploy/new" status loc \
+        "csrf_token=${csrf}" "form_token=${form_token}" \
+        "name=smoke-target" \
+        "cert_path=${cert_path}" \
+        "key_path=${key_path}" \
+        "chain_path=${chain_path}" \
+        "mode=0644" \
+        "post_command=touch ${flag}" \
+        "auto_on_rotate=1"
+    assert_eq "create → 303" "${status}" "303"
+    assert_eq "create Location" "${loc}" "/certs/${LEAF_ID}"
+
+    # Detail page now lists the target.
+    get_page "/certs/${LEAF_ID}" "${WORK_DIR}/leaf-detail.html"
+    local body
+    body=$(cat "${WORK_DIR}/leaf-detail.html")
+    assert_contains "detail lists target name" "${body}" "smoke-target"
+    assert_contains "detail lists cert_path" "${body}" "${cert_path}"
+
+    # Pull the new target id straight out of the rendered links so we can
+    # POST run / edit / delete without hitting the DB.
+    local TID
+    TID=$(printf '%s' "${body}" | grep -oE "/certs/${LEAF_ID}/deploy/[a-f0-9-]+/run" | head -1 \
+          | sed -E "s|/certs/${LEAF_ID}/deploy/([a-f0-9-]+)/run|\1|")
+    if [[ -z "${TID}" ]]; then
+        fail "could not extract deploy target id from detail page"
+        return
+    fi
+    pass "extracted target id ${TID}"
+
+    # Run the target.
+    csrf=$(extract_attr csrf_token "${WORK_DIR}/leaf-detail.html")
+    post_form "/certs/${LEAF_ID}/deploy/${TID}/run" status loc "csrf_token=${csrf}"
+    assert_eq "run → 303" "${status}" "303"
+
+    # Files exist with expected mode and parse cleanly.
+    if openssl x509 -in "${cert_path}" -noout -subject 2>/dev/null | grep -q "smoke.leaf.test"; then
+        pass "deployed cert.pem parses + matches CN"
+    else
+        fail "deployed cert.pem does not parse / wrong CN"
+    fi
+    if openssl pkey -in "${key_path}" -noout 2>/dev/null; then
+        pass "deployed key.pem parses"
+    else
+        fail "deployed key.pem does not parse"
+    fi
+    local block_count
+    block_count=$(grep -c -- "-----BEGIN CERTIFICATE-----" "${chain_path}" || true)
+    assert_eq "deployed fullchain block count" "${block_count}" "2"
+
+    # Mode is 0644 (we set it on create).
+    if [[ "$(stat -c '%a' "${cert_path}")" == "644" ]]; then
+        pass "cert mode is 644"
+    else
+        fail "cert mode: got $(stat -c '%a' "${cert_path}"), want 644"
+    fi
+
+    # post_command ran.
+    if [[ -e "${flag}" ]]; then
+        pass "post_command ran"
+    else
+        fail "post_command did not run"
+    fi
+
+    # Detail page shows status pill = ok.
+    get_page "/certs/${LEAF_ID}" "${WORK_DIR}/leaf-detail.html"
+    if grep -qE 'pill[^"]*pill-ok[^>]*>ok' "${WORK_DIR}/leaf-detail.html"; then
+        pass "detail shows ok pill for target"
+    else
+        fail "detail does not show ok pill (target likely failed)"
+    fi
+
+    # Run-all also works (one target → still ok).
+    csrf=$(extract_attr csrf_token "${WORK_DIR}/leaf-detail.html")
+    post_form "/certs/${LEAF_ID}/deploy" status loc "csrf_token=${csrf}"
+    assert_eq "run-all → 303" "${status}" "303"
+
+    # Delete the target (idempotent).
+    post_form "/certs/${LEAF_ID}/deploy/${TID}/delete" status loc "csrf_token=${csrf}"
+    assert_eq "delete → 303" "${status}" "303"
+    post_form "/certs/${LEAF_ID}/deploy/${TID}/delete" status loc "csrf_token=${csrf}"
+    assert_eq "delete replay → 303 (idempotent)" "${status}" "303"
+    get_page "/certs/${LEAF_ID}" "${WORK_DIR}/leaf-detail.html"
+    if grep -q "smoke-target" "${WORK_DIR}/leaf-detail.html"; then
+        fail "deleted target still shown on detail page"
+    else
+        pass "target removed from detail page"
+    fi
+}
+
 test_lock_state() {
     echo "==> Lock and re-check sensitive endpoints"
     local csrf status loc
@@ -326,6 +432,7 @@ main() {
     test_fullchain_pem
     test_openssl_verify
     test_bundle_p12
+    test_deploy
     test_lock_state
 
     echo

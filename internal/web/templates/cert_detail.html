@@ -146,6 +146,60 @@
       </small>
     </form>
   </details>
+
+  <h3 style="font-size: 0.95rem; font-weight: 500;">Deploy targets</h3>
+  {{if .DeployTargets}}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Cert path</th>
+        <th>Auto on rotate</th>
+        <th>Last status</th>
+        <th>Last run</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .DeployTargets}}
+      <tr>
+        <td><strong>{{.Name}}</strong></td>
+        <td><code style="font-size: 0.78rem;">{{.CertPath}}</code></td>
+        <td>{{if .AutoOnRotate}}yes{{else}}no{{end}}</td>
+        <td><span class="pill {{.StatusPillClass}}">{{.EffectiveStatus}}</span></td>
+        <td>{{if .LastDeployedDisplay}}<small>{{.LastDeployedDisplay}}</small>{{else}}<small>—</small>{{end}}</td>
+        <td style="text-align: right; white-space: nowrap;">
+          <form method="post" action="/certs/{{$.View.ID}}/deploy/{{.ID}}/run" style="display: inline; margin: 0;">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <button type="submit" class="secondary outline" style="padding: 0.2rem 0.5rem;">Run</button>
+          </form>
+          <a href="/certs/{{$.View.ID}}/deploy/{{.ID}}/edit" role="button" class="secondary outline" style="padding: 0.2rem 0.5rem;">Edit</a>
+          <form method="post" action="/certs/{{$.View.ID}}/deploy/{{.ID}}/delete" style="display: inline; margin: 0;" onsubmit="return confirm('Delete deploy target {{.Name}}?');">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <button type="submit" class="contrast outline" style="padding: 0.2rem 0.5rem;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {{if .LastError}}
+      <tr><td colspan="6"><small style="color: var(--pico-color-red-550);">{{.LastError}}</small></td></tr>
+      {{end}}
+      {{end}}
+    </tbody>
+  </table>
+  <p style="margin-top: 0.5rem;">
+    <a href="/certs/{{.View.ID}}/deploy/new" role="button" class="secondary">Add deploy target</a>
+    <form method="post" action="/certs/{{.View.ID}}/deploy" style="display: inline; margin-left: 0.5rem;">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button type="submit" class="secondary outline">Run all</button>
+    </form>
+  </p>
+  {{else}}
+  <p>
+    No deploy targets configured.
+    <a href="/certs/{{.View.ID}}/deploy/new">Add one</a> to write this cert
+    to disk somewhere.
+  </p>
+  {{end}}
   {{end}}
 </article>
 {{end}}
