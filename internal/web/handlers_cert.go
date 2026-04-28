@@ -18,6 +18,7 @@ type certDetailViewData struct {
 	IssuerID       string // parent's ID for linking, "" for roots
 	Chain          []*CertView
 	FingerprintFmt string // SHA-256 colon-separated for display
+	DeployTargets  []*DeployTargetView
 }
 
 // handleCertDetail serves /certs/{id}. 404s if the cert doesn't exist.
@@ -58,6 +59,16 @@ func (s *Server) handleCertDetail(w http.ResponseWriter, r *http.Request) {
 		issuerID = chain[1].ID
 	}
 
+	var deployTargets []*DeployTargetView
+	if cert.Type == "leaf" {
+		targets, err := store.ListDeployTargets(s.db, cert.ID)
+		if err != nil {
+			internalServerError(w, "cert-detail: ListDeployTargets", err)
+			return
+		}
+		deployTargets = newDeployTargetViews(targets, cert.SerialNumber)
+	}
+
 	s.render(w, "cert_detail", certDetailViewData{
 		CSRFToken:      CSRFToken(r),
 		View:           view,
@@ -65,6 +76,7 @@ func (s *Server) handleCertDetail(w http.ResponseWriter, r *http.Request) {
 		IssuerID:       issuerID,
 		Chain:          chainViews,
 		FingerprintFmt: formatFingerprint(cert.FingerprintSHA256),
+		DeployTargets:  deployTargets,
 	})
 }
 
