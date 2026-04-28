@@ -28,11 +28,10 @@ multi-tenant access. These can be added later but bloat v1.
 - **Language:** Go (latest stable).
 - **HTTP:** stdlib `net/http` with 1.22+ pattern routing — no chi/gorilla.
 - **Templating:** `html/template` + htmx — no template codegen.
-- **Codegen:** allowed where it materially reduces hand-written code or
-  catches whole classes of bugs. Generated files are committed so the
-  default `go build` works with no extra step; tooling-required steps
-  (e.g. `sqlc generate`) are run by `make generate` and verified clean
-  in CI. Currently in use: `sqlc` for SQL → typed Go in `internal/store/`.
+- **Codegen:** allowed where it materially reduces hand-written code
+  or catches whole classes of bugs. Generated files are committed so
+  `go build` requires no extra step. In use: `sqlc` for SQL → typed
+  Go in `internal/store/`.
 - **DB:** SQLite via `modernc.org/sqlite` (pure Go → `CGO_ENABLED=0` → static scratch image). See [STORAGE.md](STORAGE.md).
 - **PKCS#12 export:** `software.sslmate.com/src/go-pkcs12` using `pkcs12.Modern.Encode` (AES-256, understood by openssl 3 / browsers).
 - **CRL generation:** stdlib `crypto/x509.CreateRevocationList`.
