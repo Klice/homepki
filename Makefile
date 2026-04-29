@@ -26,6 +26,25 @@ build: ## build the homepki binary into bin/
 run: ## run the server with dev-friendly env defaults
 	CRL_BASE_URL=$(CRL_BASE_URL) CM_DATA_DIR=$(CM_DATA_DIR) CM_LOG_FORMAT=$(CM_LOG_FORMAT) go run $(ENTRY)
 
+.PHONY: dev
+dev: ## wipe ./tmp/data, start the server, and seed CAs + leaves (uses scripts/dev-bootstrap.sh)
+	scripts/dev-bootstrap.sh
+
+.PHONY: dev-stop
+dev-stop: ## stop the dev server started by `make dev` (kills the pid in tmp/homepki.pid)
+	@if [ -f ./tmp/homepki.pid ]; then \
+		pid=$$(cat ./tmp/homepki.pid); \
+		if kill -0 $$pid 2>/dev/null; then \
+			echo "stopping dev server (pid $$pid)"; \
+			kill $$pid; \
+		else \
+			echo "no running process for pid $$pid"; \
+		fi; \
+		rm -f ./tmp/homepki.pid; \
+	else \
+		echo "no ./tmp/homepki.pid; nothing to stop"; \
+	fi
+
 .PHONY: test
 test: ## run unit tests with race detector (overrides CGO_ENABLED=0 for the run)
 	CGO_ENABLED=1 go test -race -count=1 $(PKG)
