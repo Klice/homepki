@@ -406,6 +406,60 @@ test_deploy() {
     fi
 }
 
+test_crl_history() {
+    echo "==> CRL history (revoke to bump CRL number, then exercise the page + per-version download)"
+
+    # 1. Revoke the leaf so the intermediate's CRL bumps from 1 to 2.
+    get_page "/certs/${LEAF_ID}" "${WORK_DIR}/leaf-detail.html"
+    local csrf
+    csrf=$(extract_attr csrf_token "${WORK_DIR}/leaf-detail.html")
+    local revoke_status revoke_loc
+    post_form "/certs/${LEAF_ID}/revoke" revoke_status revoke_loc \
+        "csrf_token=${csrf}" "reason=1"
+    assert_eq "revoke → 303" "${revoke_status}" "303"
+
+    # 2. History page on the intermediate lists both rows newest-first
+    #    with download links to /crl/<inter>/{1,2}.crl.
+    get_page "/certs/${INTER_ID}/crls" "${WORK_DIR}/crl-history.html"
+    local body
+    body=$(cat "${WORK_DIR}/crl-history.html")
+    assert_contains "history page header" "${body}" "CRL history"
+    assert_contains "history links to CRL #1" "${body}" "/crl/${INTER_ID}/1.crl"
+    assert_contains "history links to CRL #2" "${body}" "/crl/${INTER_ID}/2.crl"
+    # Latest pill on the newest row.
+    assert_contains "latest pill" "${body}" "latest"
+
+    # 3. Both numbered CRLs download as valid DER.
+    local der_dir="${WORK_DIR}/crl-history-der"
+    mkdir -p "${der_dir}"
+    local s1 s2
+    s1=$(get_with_headers "/crl/${INTER_ID}/1.crl" "${der_dir}/1.crl")
+    assert_eq "CRL #1 status" "${s1}" "200"
+    assert_contains "CRL #1 Cache-Control immutable" "$(header_value cache-control)" "immutable"
+    if openssl crl -inform DER -in "${der_dir}/1.crl" -noout -nameopt RFC2253 -text >/dev/null 2>&1; then
+        pass "CRL #1 parses as DER"
+    else
+        fail "CRL #1 failed to parse as DER"
+    fi
+    local count1
+    count1=$(openssl crl -inform DER -in "${der_dir}/1.crl" -noout -text 2>/dev/null \
+        | grep -c "Serial Number:" || true)
+    assert_eq "CRL #1 has 0 entries (initial)" "${count1}" "0"
+
+    s2=$(get_with_headers "/crl/${INTER_ID}/2.crl" "${der_dir}/2.crl")
+    assert_eq "CRL #2 status" "${s2}" "200"
+    local count2
+    count2=$(openssl crl -inform DER -in "${der_dir}/2.crl" -noout -text 2>/dev/null \
+        | grep -c "Serial Number:" || true)
+    assert_eq "CRL #2 has 1 entry (revoked leaf)" "${count2}" "1"
+
+    # 4. Negative cases.
+    assert_eq "missing CRL number → 404"     "$(get_status "/crl/${INTER_ID}/99.crl")" "404"
+    assert_eq "non-numeric segment → 404"    "$(get_status "/crl/${INTER_ID}/abc.crl")" "404"
+    assert_eq "leaf historical CRL → 404"    "$(get_status "/crl/${LEAF_ID}/1.crl")"   "404"
+    assert_eq "leaf history page → 404"      "$(get_status "/certs/${LEAF_ID}/crls")"   "404"
+}
+
 test_passphrase_rotate() {
     echo "==> Rotate passphrase"
     local new_pp="rotated-passphrase-${RANDOM}-abc"
@@ -499,6 +553,7 @@ main() {
     test_openssl_verify
     test_bundle_p12
     test_deploy
+    test_crl_history
     test_passphrase_rotate
     test_lock_state
 
