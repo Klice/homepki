@@ -90,7 +90,7 @@ func TestVerifySession_RejectsGarbage(t *testing.T) {
 	cases := []string{
 		"",
 		"not-base64-!!!",
-		"AA",                  // valid base64 but too short
+		"AA",                    // valid base64 but too short
 		strings.Repeat("A", 50), // valid base64, plausibly long but no valid payload+sig
 	}
 	for _, v := range cases {

@@ -108,6 +108,7 @@ func buildInitialCRL(certID string, issued *pki.Issued) (*store.CRL, error) {
 //   - inserts the new cert + key (+ CRL)
 //   - flips the old cert to superseded with replaced_by_id = new id
 //   - marks the form token used
+//
 // Returns the new cert id. Per LIFECYCLE.md §4.2/§4.3.
 func (s *Server) persistRotation(certType string, parentID *string, oldID string, issued *pki.Issued, keySpec pki.KeySpec, formToken string) (string, error) {
 	pkcs8, err := x509.MarshalPKCS8PrivateKey(issued.Key)

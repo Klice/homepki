@@ -147,9 +147,12 @@ func TestDeploys_List_OrderingAndCertScope(t *testing.T) {
 	}
 	leafID := seedLeaf(t, db)
 
-	a := sampleTarget("ta", leafID); a.Name = "alpha"
-	b := sampleTarget("tb", leafID); b.Name = "bravo"
-	c := sampleTarget("tc", leafID); c.Name = "alpha" // duplicate name on same cert → unique violation
+	a := sampleTarget("ta", leafID)
+	a.Name = "alpha"
+	b := sampleTarget("tb", leafID)
+	b.Name = "bravo"
+	c := sampleTarget("tc", leafID)
+	c.Name = "alpha" // duplicate name on same cert → unique violation
 	if err := InsertDeployTarget(db, a); err != nil {
 		t.Fatal(err)
 	}

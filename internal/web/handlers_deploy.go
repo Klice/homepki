@@ -34,15 +34,15 @@ type deployFormView struct {
 	// TargetID is empty in the create flow.
 	TargetID string
 
-	Name           string
-	CertPath       string
-	KeyPath        string
-	ChainPath      string
-	Mode           string
-	Owner          string
-	Group          string
-	PostCommand    string
-	AutoOnRotate   bool
+	Name         string
+	CertPath     string
+	KeyPath      string
+	ChainPath    string
+	Mode         string
+	Owner        string
+	Group        string
+	PostCommand  string
+	AutoOnRotate bool
 }
 
 // ============== new ==============

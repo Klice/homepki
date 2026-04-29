@@ -200,4 +200,3 @@ func (s *Server) renderSettingsError(w http.ResponseWriter, r *http.Request, for
 		MinLen:    MinPassphraseLen,
 	})
 }
-

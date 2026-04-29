@@ -17,10 +17,10 @@ const SaltLen = 16
 //
 // See LIFECYCLE.md §1.1 for the v1 defaults.
 type KDFParams struct {
-	Time    uint32 `json:"time"`     // iterations
-	Memory  uint32 `json:"memory"`   // KiB
-	Threads uint8  `json:"threads"`  // parallelism
-	KeyLen  uint32 `json:"key_len"`  // output length in bytes
+	Time    uint32 `json:"time"`    // iterations
+	Memory  uint32 `json:"memory"`  // KiB
+	Threads uint8  `json:"threads"` // parallelism
+	KeyLen  uint32 `json:"key_len"` // output length in bytes
 }
 
 // DefaultKDFParams returns the v1 Argon2id defaults: time=3, memory=64 MiB,

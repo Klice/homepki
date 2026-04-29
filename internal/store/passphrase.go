@@ -31,10 +31,10 @@ type RotatePassphraseInputs struct {
 // RotatePassphrase performs the rewrap-all-DEKs transaction described in
 // LIFECYCLE.md §1.6 / STORAGE.md §7. In one DEFERRED tx:
 //
-//   1. Stream every cert_keys row, call rewrap to produce the new
-//      (wrapped_dek, dek_nonce), update the row.
-//   2. Write kdf_salt, kdf_params, passphrase_verifier into settings.
-//   3. Mark the form token used.
+//  1. Stream every cert_keys row, call rewrap to produce the new
+//     (wrapped_dek, dek_nonce), update the row.
+//  2. Write kdf_salt, kdf_params, passphrase_verifier into settings.
+//  3. Mark the form token used.
 //
 // The transaction rolls back if any rewrap returns an error, leaving the
 // store in its pre-rotation state. The caller is responsible for swapping

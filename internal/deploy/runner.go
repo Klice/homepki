@@ -81,8 +81,8 @@ func Run(ctx context.Context, target *store.DeployTarget, b Bytes) Result {
 			return failed("chain_path is set but no chain bytes were supplied")
 		}
 		writes = append(writes, struct {
-			path string
-			data []byte
+			path  string
+			data  []byte
 			label string
 		}{*target.ChainPath, b.FullChain, "chain"})
 	}

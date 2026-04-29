@@ -96,11 +96,11 @@ func TestDeriveKEK_RejectsEmptyInputs(t *testing.T) {
 	p := fastKDFParams()
 
 	cases := []struct {
-		name      string
+		name       string
 		passphrase []byte
-		salt      []byte
-		params    KDFParams
-		want      string
+		salt       []byte
+		params     KDFParams
+		want       string
 	}{
 		{"empty passphrase", nil, salt, p, "passphrase"},
 		{"empty salt", []byte("pw"), nil, p, "salt"},
