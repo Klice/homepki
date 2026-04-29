@@ -120,4 +120,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /unlock", s.handleUnlockGet)
 	s.mux.HandleFunc("POST /unlock", s.handleUnlockPost)
 	s.mux.HandleFunc("POST /lock", s.handleLock)
+	s.mux.HandleFunc("GET /settings", s.handleSettingsGet)
+	s.mux.HandleFunc("POST /settings/passphrase", s.handleSettingsPassphrasePost)
 }

@@ -406,6 +406,72 @@ test_deploy() {
     fi
 }
 
+test_passphrase_rotate() {
+    echo "==> Rotate passphrase"
+    local new_pp="rotated-passphrase-${RANDOM}-abc"
+
+    # GET /settings, grab CSRF + form_token, POST the rotation.
+    local html="${WORK_DIR}/settings.html"
+    get_page "/settings" "${html}"
+    local csrf form_token status loc
+    csrf=$(extract_attr csrf_token "${html}")
+    form_token=$(extract_attr form_token "${html}")
+
+    post_form "/settings/passphrase" status loc \
+        "csrf_token=${csrf}" "form_token=${form_token}" \
+        "current=${PASSPHRASE}" "new=${new_pp}" "new2=${new_pp}"
+    assert_eq "rotate → 303" "${status}" "303"
+    assert_contains "rotate Location" "${loc}" "/settings"
+
+    # The current session cookie was re-issued under the new HKDF secret —
+    # GET / still works without re-unlocking (API.md §4.4).
+    assert_eq "GET / after rotate" "$(get_status "/")" "200"
+
+    # Replay: same form_token POSTed again. Should 303 to the same URL
+    # WITHOUT re-verifying current (which would now fail).
+    local replay_status replay_loc
+    post_form "/settings/passphrase" replay_status replay_loc \
+        "csrf_token=${csrf}" "form_token=${form_token}" \
+        "current=${PASSPHRASE}" "new=${new_pp}" "new2=${new_pp}"
+    assert_eq "rotate replay → 303" "${replay_status}" "303"
+    assert_eq "rotate replay Location matches" "${replay_loc}" "${loc}"
+
+    # Old passphrase no longer unlocks.
+    get_page "/lock" /dev/null  # prime: irrelevant, want CSRF for /lock POST below
+    get_page "/certs/${LEAF_ID}" "${WORK_DIR}/leaf-detail.html"
+    csrf=$(extract_attr csrf_token "${WORK_DIR}/leaf-detail.html")
+    post_form "/lock" status loc "csrf_token=${csrf}"
+    assert_eq "/lock after rotate → 303" "${status}" "303"
+
+    rm -f "${COOKIES}" # drop session for a fresh unlock attempt
+    get_page "/unlock" "${WORK_DIR}/unlock.html"
+    csrf=$(extract_attr csrf_token "${WORK_DIR}/unlock.html")
+
+    local bad_status bad_loc
+    post_form "/unlock" bad_status bad_loc \
+        "csrf_token=${csrf}" "passphrase=${PASSPHRASE}"
+    assert_eq "old passphrase → 400" "${bad_status}" "400"
+
+    # New passphrase does. Need to refresh CSRF after the failed POST since
+    # gorilla/csrf may rotate the masked token; safest is GET /unlock again.
+    get_page "/unlock" "${WORK_DIR}/unlock.html"
+    csrf=$(extract_attr csrf_token "${WORK_DIR}/unlock.html")
+    local good_status good_loc
+    post_form "/unlock" good_status good_loc \
+        "csrf_token=${csrf}" "passphrase=${new_pp}"
+    assert_eq "new passphrase → 303" "${good_status}" "303"
+
+    # And the existing leaf's key still decrypts under the rewrapped DEK.
+    if curl -s -b "${COOKIES}" "${BASE_URL}/certs/${LEAF_ID}/key.pem" | openssl pkey -noout 2>/dev/null; then
+        pass "key.pem still decrypts after rewrap"
+    else
+        fail "key.pem failed to decrypt after rewrap"
+    fi
+
+    # Persist new passphrase for the lock-state test that runs after.
+    PASSPHRASE="${new_pp}"
+}
+
 test_lock_state() {
     echo "==> Lock and re-check sensitive endpoints"
     local csrf status loc
@@ -433,6 +499,7 @@ main() {
     test_openssl_verify
     test_bundle_p12
     test_deploy
+    test_passphrase_rotate
     test_lock_state
 
     echo
