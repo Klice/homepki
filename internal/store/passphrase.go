@@ -46,8 +46,14 @@ func RotatePassphrase(db *sql.DB, in RotatePassphraseInputs, rewrap RewrapFunc, 
 	if rewrap == nil {
 		return errors.New("RotatePassphrase: rewrap callback required")
 	}
-	if len(in.NewSalt) == 0 || len(in.NewParamsJSON) == 0 || len(in.NewVerifier) == 0 {
-		return errors.New("RotatePassphrase: salt, params, and verifier required")
+	if len(in.NewSalt) == 0 {
+		return errors.New("RotatePassphrase: NewSalt required")
+	}
+	if len(in.NewParamsJSON) == 0 {
+		return errors.New("RotatePassphrase: NewParamsJSON required")
+	}
+	if len(in.NewVerifier) == 0 {
+		return errors.New("RotatePassphrase: NewVerifier required")
 	}
 
 	tx, err := db.Begin()

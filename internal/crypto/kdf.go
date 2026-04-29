@@ -56,8 +56,14 @@ func DeriveKEK(passphrase, salt []byte, p KDFParams) ([]byte, error) {
 	if p.KeyLen == 0 {
 		return nil, errors.New("DeriveKEK: KeyLen must be > 0")
 	}
-	if p.Time == 0 || p.Memory == 0 || p.Threads == 0 {
-		return nil, errors.New("DeriveKEK: KDFParams Time, Memory, and Threads must all be > 0")
+	if p.Time == 0 {
+		return nil, errors.New("DeriveKEK: Time must be > 0")
+	}
+	if p.Memory == 0 {
+		return nil, errors.New("DeriveKEK: Memory must be > 0")
+	}
+	if p.Threads == 0 {
+		return nil, errors.New("DeriveKEK: Threads must be > 0")
 	}
 	return argon2.IDKey(passphrase, salt, p.Time, p.Memory, p.Threads, p.KeyLen), nil
 }

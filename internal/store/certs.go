@@ -131,8 +131,14 @@ func IssueRotationWithToken(db *sql.DB, newCert *Cert, newKey *CertKey, initialC
 	if oldID == "" {
 		return errors.New("IssueRotationWithToken: oldID required")
 	}
-	if newCert == nil || newCert.ReplacesID == nil || *newCert.ReplacesID != oldID {
-		return errors.New("IssueRotationWithToken: newCert.ReplacesID must equal oldID")
+	if newCert == nil {
+		return errors.New("IssueRotationWithToken: newCert required")
+	}
+	if newCert.ReplacesID == nil {
+		return errors.New("IssueRotationWithToken: newCert.ReplacesID must be set to oldID")
+	}
+	if *newCert.ReplacesID != oldID {
+		return fmt.Errorf("IssueRotationWithToken: newCert.ReplacesID %q != oldID %q", *newCert.ReplacesID, oldID)
 	}
 	tx, err := db.Begin()
 	if err != nil {

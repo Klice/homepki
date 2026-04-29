@@ -57,8 +57,11 @@ func InsertDeployTarget(db sqlcDBTX, t *DeployTarget) error {
 	if t == nil {
 		return errors.New("InsertDeployTarget: target required")
 	}
-	if t.ID == "" || t.CertID == "" {
-		return errors.New("InsertDeployTarget: ID and CertID required")
+	if t.ID == "" {
+		return errors.New("InsertDeployTarget: ID required")
+	}
+	if t.CertID == "" {
+		return errors.New("InsertDeployTarget: CertID required")
 	}
 	if err := storedb.New(db).InsertDeployTarget(context.Background(), insertParams(t)); err != nil {
 		return fmt.Errorf("InsertDeployTarget: %w", err)
@@ -95,8 +98,14 @@ func CreateDeployTargetWithToken(db *sql.DB, t *DeployTarget, formToken, resultU
 // the row level — a failed rename in the runner won't leave the metadata
 // half-updated.
 func UpdateDeployTarget(db sqlcDBTX, t *DeployTarget) error {
-	if t == nil || t.ID == "" || t.CertID == "" {
-		return errors.New("UpdateDeployTarget: ID and CertID required")
+	if t == nil {
+		return errors.New("UpdateDeployTarget: target required")
+	}
+	if t.ID == "" {
+		return errors.New("UpdateDeployTarget: ID required")
+	}
+	if t.CertID == "" {
+		return errors.New("UpdateDeployTarget: CertID required")
 	}
 	n, err := storedb.New(db).UpdateDeployTarget(context.Background(), updateParams(t))
 	if err != nil {

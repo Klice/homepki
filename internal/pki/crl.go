@@ -31,8 +31,14 @@ type CRLRequest struct {
 // Entries slice is valid and produces an empty CRL (used for the initial
 // CRL written on CA issuance per §6.2).
 func CreateCRL(req CRLRequest) ([]byte, error) {
-	if req.Issuer == nil || req.Issuer.Cert == nil || req.Issuer.Key == nil {
-		return nil, errors.New("CreateCRL: issuer cert and key required")
+	if req.Issuer == nil {
+		return nil, errors.New("CreateCRL: Issuer required")
+	}
+	if req.Issuer.Cert == nil {
+		return nil, errors.New("CreateCRL: Issuer.Cert required")
+	}
+	if req.Issuer.Key == nil {
+		return nil, errors.New("CreateCRL: Issuer.Key required")
 	}
 	if req.Number == nil || req.Number.Sign() < 0 {
 		return nil, errors.New("CreateCRL: positive Number required")
