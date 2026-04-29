@@ -1,0 +1,41 @@
+name: Release tag
+
+# Cross-compile homepki for every supported os/arch and attach the archives
+# (plus a checksums.txt) to the GitHub release for the pushed tag.
+#
+# The matching Docker image is published by .github/workflows/release.yml
+# against the same tag — both workflows run in parallel and don't conflict.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the release and upload assets
+  packages: write   # not used here, but reserved if goreleaser later
+                    # owns the docker publish too
+
+concurrency:
+  group: release-tag-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # goreleaser needs full history to compute the changelog from
+          # commits between this tag and the previous one.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

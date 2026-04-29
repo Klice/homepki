@@ -42,8 +42,9 @@ ACME server, no multi-tenant CA dashboard. If you want those, use
 ## Run it
 
 The published image is at `ghcr.io/klice/homepki`. Pick the tag that
-matches what you want — `latest` follows the main branch, `vX.Y.Z` pins
-to a release.
+matches what you want — `latest` is the most recent stable release,
+`vX.Y.Z` pins to a specific one, and `edge` follows the main branch
+(bleeding edge, possibly unreleased).
 
 ### Quick start with Docker
 

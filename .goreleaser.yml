@@ -1,0 +1,102 @@
+# goreleaser config — produces release artifacts on `v*` tag pushes.
+#
+# Local dry-run:   goreleaser release --snapshot --clean
+# Local check:     goreleaser check
+# Real release:    triggered by .github/workflows/release-tag.yml on tag push.
+#
+# This config OWNS the GitHub Release object — binaries, archives, and
+# checksums attached. The Docker image is published separately by
+# .github/workflows/release.yml against the same tag, so a v1.0.0 push
+# yields both `homepki:v1.0.0` on GHCR and a GitHub release with binaries.
+
+version: 2
+project_name: homepki
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+
+builds:
+  - id: homepki
+    main: ./cmd/homepki
+    binary: homepki
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ignore:
+      # arm/v7 isn't a meaningful target for desktop OSes.
+      - goos: darwin
+        goarch: arm
+      - goos: windows
+        goarch: arm
+
+archives:
+  - id: homepki
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+      {{- with .Arm }}v{{ . }}{{ end }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# Pull commit subjects into the release notes, but keep the noise out so
+# the release page focuses on user-visible work.
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^build:'
+      - '^ci:'
+      - '^style:'
+      - 'Merge pull request'
+
+release:
+  github:
+    owner: Klice
+    name: homepki
+  draft: false
+  # Pre-release if the tag has a `-rc.1` / `-beta` style suffix.
+  prerelease: auto
+  # Body footer — points readers at the matching GHCR image so they don't
+  # have to guess the image name from the release page.
+  footer: |
+    ---
+
+    ### Container image
+
+    The matching Docker image was published by the same tag push:
+
+    ```
+    docker pull ghcr.io/klice/homepki:{{ .Tag }}
+    ```
+
+    See the [README](https://github.com/Klice/homepki/blob/main/README.md)
+    for run instructions.
