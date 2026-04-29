@@ -1,13 +1,14 @@
 package store
 
 import (
+	"cmp"
 	"database/sql"
 	"embed"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 )
 
@@ -104,6 +105,6 @@ func loadMigrations() ([]migration, error) {
 		}
 		out = append(out, migration{version: v, name: e.Name()})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].version < out[j].version })
+	slices.SortFunc(out, func(a, b migration) int { return cmp.Compare(a.version, b.version) })
 	return out, nil
 }

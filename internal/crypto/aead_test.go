@@ -46,7 +46,7 @@ func TestSeal_NonceIsUnique(t *testing.T) {
 	aad := []byte("aad")
 
 	seen := map[string]bool{}
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		nonce, _, err := Seal(key, plaintext, aad)
 		if err != nil {
 			t.Fatal(err)

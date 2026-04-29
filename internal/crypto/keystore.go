@@ -1,13 +1,11 @@
 package crypto
 
 import (
+	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/sha256"
 	"errors"
-	"io"
 	"sync"
-
-	"golang.org/x/crypto/hkdf"
 )
 
 // VerifierLabel is the constant string MAC'd under the KEK to produce a
@@ -144,10 +142,9 @@ const SessionSecretLen = 32
 func (k *Keystore) DeriveSessionSecret() ([]byte, error) {
 	var out []byte
 	err := k.With(func(kek []byte) error {
-		h := hkdf.New(sha256.New, kek, nil, []byte(SessionSecretLabel))
-		out = make([]byte, SessionSecretLen)
-		_, err := io.ReadFull(h, out)
-		return err
+		var derr error
+		out, derr = hkdf.Key(sha256.New, kek, nil, SessionSecretLabel, SessionSecretLen)
+		return derr
 	})
 	return out, err
 }

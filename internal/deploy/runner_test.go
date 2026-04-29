@@ -37,7 +37,7 @@ func sampleBytes() Bytes {
 func TestRun_WritesCertAndKey(t *testing.T) {
 	dir := t.TempDir()
 	tgt := minimalTarget(dir)
-	res := Run(context.Background(), tgt, sampleBytes())
+	res := Run(t.Context(), tgt, sampleBytes())
 	if res.Status != store.DeployStatusOK {
 		t.Fatalf("status=%v err=%q", res.Status, res.Err)
 	}
@@ -55,7 +55,7 @@ func TestRun_AppliesMode(t *testing.T) {
 	dir := t.TempDir()
 	tgt := minimalTarget(dir)
 	tgt.Mode = "0600"
-	res := Run(context.Background(), tgt, sampleBytes())
+	res := Run(t.Context(), tgt, sampleBytes())
 	if res.Status != store.DeployStatusOK {
 		t.Fatalf("res=%+v", res)
 	}
@@ -75,7 +75,7 @@ func TestRun_WritesChainWhenSet(t *testing.T) {
 	tgt := minimalTarget(dir)
 	chain := filepath.Join(dir, "fullchain.pem")
 	tgt.ChainPath = &chain
-	res := Run(context.Background(), tgt, sampleBytes())
+	res := Run(t.Context(), tgt, sampleBytes())
 	if res.Status != store.DeployStatusOK {
 		t.Fatalf("res=%+v", res)
 	}
@@ -93,7 +93,7 @@ func TestRun_ChainPathSetButNoChainBytes(t *testing.T) {
 
 	b := sampleBytes()
 	b.FullChain = nil
-	res := Run(context.Background(), tgt, b)
+	res := Run(t.Context(), tgt, b)
 	if res.Status != store.DeployStatusFailed {
 		t.Errorf("expected failed, got %v", res.Status)
 	}
@@ -106,7 +106,7 @@ func TestRun_RejectsRelativePath(t *testing.T) {
 	dir := t.TempDir()
 	tgt := minimalTarget(dir)
 	tgt.CertPath = "relative/cert.pem"
-	res := Run(context.Background(), tgt, sampleBytes())
+	res := Run(t.Context(), tgt, sampleBytes())
 	if res.Status != store.DeployStatusFailed {
 		t.Errorf("expected failed, got %v", res.Status)
 	}
@@ -122,7 +122,7 @@ func TestRun_AtomicReplace(t *testing.T) {
 	if err := os.WriteFile(tgt.CertPath, []byte("OLD"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res := Run(context.Background(), tgt, sampleBytes())
+	res := Run(t.Context(), tgt, sampleBytes())
 	if res.Status != store.DeployStatusOK {
 		t.Fatalf("res=%+v", res)
 	}
@@ -145,7 +145,7 @@ func TestRun_PostCommandSucceeds(t *testing.T) {
 	tgt := minimalTarget(dir)
 	tgt.PostCommand = ptr("touch " + flag)
 
-	res := Run(context.Background(), tgt, sampleBytes())
+	res := Run(t.Context(), tgt, sampleBytes())
 	if res.Status != store.DeployStatusOK {
 		t.Fatalf("res=%+v", res)
 	}
@@ -158,7 +158,7 @@ func TestRun_PostCommandFailureRecorded(t *testing.T) {
 	dir := t.TempDir()
 	tgt := minimalTarget(dir)
 	tgt.PostCommand = ptr("exit 1")
-	res := Run(context.Background(), tgt, sampleBytes())
+	res := Run(t.Context(), tgt, sampleBytes())
 	if res.Status != store.DeployStatusFailed {
 		t.Errorf("expected failed, got %v", res.Status)
 	}
@@ -177,7 +177,7 @@ func TestRun_PostCommandTimesOut(t *testing.T) {
 
 	// Use a context with our own short deadline to avoid waiting the full
 	// PostCommandTimeout in CI. The runner respects ctx.
-	ctx, cancel := context.WithTimeout(context.Background(), 1)
+	ctx, cancel := context.WithTimeout(t.Context(), 1)
 	defer cancel()
 	res := Run(ctx, tgt, sampleBytes())
 	if res.Status != store.DeployStatusFailed {
@@ -189,7 +189,7 @@ func TestRun_UnknownOwnerFails(t *testing.T) {
 	dir := t.TempDir()
 	tgt := minimalTarget(dir)
 	tgt.Owner = ptr("definitely-no-such-user")
-	res := Run(context.Background(), tgt, sampleBytes())
+	res := Run(t.Context(), tgt, sampleBytes())
 	if res.Status != store.DeployStatusFailed {
 		t.Errorf("expected failed, got %v", res.Status)
 	}
@@ -205,14 +205,14 @@ func TestRun_NumericOwnerNoChown(t *testing.T) {
 	tgt.Owner = ptr("0")
 	if uid != 0 {
 		// Non-root tests can't chown to uid 0; expect a permission failure.
-		res := Run(context.Background(), tgt, sampleBytes())
+		res := Run(t.Context(), tgt, sampleBytes())
 		if res.Status != store.DeployStatusFailed {
 			t.Errorf("expected failed (non-root chown to 0), got %v", res.Status)
 		}
 		return
 	}
 	// Running as root: should succeed.
-	res := Run(context.Background(), tgt, sampleBytes())
+	res := Run(t.Context(), tgt, sampleBytes())
 	if res.Status != store.DeployStatusOK {
 		t.Errorf("expected ok as root, got %+v", res)
 	}
