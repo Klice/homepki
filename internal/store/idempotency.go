@@ -34,7 +34,7 @@ type IdemToken struct {
 func CreateIdemToken(db sqlcDBTX) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("CreateIdemToken: rand: %w", err)
+		return "", fmt.Errorf("rand: %w", err)
 	}
 	token := hex.EncodeToString(raw)
 	now := time.Now().UTC()
@@ -44,7 +44,7 @@ func CreateIdemToken(db sqlcDBTX) (string, error) {
 		ExpiresAt: now.Add(IdemTokenTTL),
 	})
 	if err != nil {
-		return "", fmt.Errorf("CreateIdemToken: %w", err)
+		return "", err
 	}
 	return token, nil
 }
@@ -60,7 +60,7 @@ func LookupIdemToken(db sqlcDBTX, token string) (*IdemToken, error) {
 		return nil, ErrIdemTokenNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("LookupIdemToken: %w", err)
+		return nil, err
 	}
 	return &IdemToken{
 		Token:     row.Token,
@@ -83,7 +83,7 @@ func MarkIdemTokenUsed(db sqlcDBTX, token, resultURL string) error {
 		Token:     token,
 	})
 	if err != nil {
-		return fmt.Errorf("MarkIdemTokenUsed: %w", err)
+		return err
 	}
 	if n == 0 {
 		return ErrIdemTokenNotFound
@@ -96,7 +96,7 @@ func MarkIdemTokenUsed(db sqlcDBTX, token, resultURL string) error {
 func CleanupExpiredIdemTokens(db sqlcDBTX) (int, error) {
 	n, err := storedb.New(db).DeleteExpiredIdemTokens(context.Background())
 	if err != nil {
-		return 0, fmt.Errorf("CleanupExpiredIdemTokens: %w", err)
+		return 0, err
 	}
 	return int(n), nil
 }

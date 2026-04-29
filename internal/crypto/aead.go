@@ -23,7 +23,7 @@ const NonceLen = 12
 // substitution between rows (see LIFECYCLE.md §2.2).
 func Seal(key, plaintext, aad []byte) (nonce, ciphertext []byte, err error) {
 	if len(key) != KeyLen {
-		return nil, nil, errors.New("Seal: key must be 32 bytes")
+		return nil, nil, errors.New("key must be 32 bytes")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -46,10 +46,10 @@ func Seal(key, plaintext, aad []byte) (nonce, ciphertext []byte, err error) {
 // wrong nonce, wrong aad, or tampered ciphertext).
 func Open(key, nonce, ciphertext, aad []byte) ([]byte, error) {
 	if len(key) != KeyLen {
-		return nil, errors.New("Open: key must be 32 bytes")
+		return nil, errors.New("key must be 32 bytes")
 	}
 	if len(nonce) != NonceLen {
-		return nil, errors.New("Open: nonce must be 12 bytes")
+		return nil, errors.New("nonce must be 12 bytes")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {

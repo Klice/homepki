@@ -399,7 +399,7 @@ func parseSANIPs(input string) ([]net.IP, error) {
 	for _, s := range parseSANDNS(input) {
 		ip := net.ParseIP(s)
 		if ip == nil {
-			return nil, fmt.Errorf("Not a valid IP address: %q", s)
+			return nil, fmt.Errorf("not a valid IP address: %q", s)
 		}
 		out = append(out, ip)
 	}

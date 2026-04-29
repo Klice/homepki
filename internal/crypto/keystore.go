@@ -79,7 +79,7 @@ func NewKeystore() *Keystore {
 // replaced.
 func (k *Keystore) Install(kek []byte) error {
 	if len(kek) != KeyLen {
-		return errors.New("Install: kek must be 32 bytes")
+		return errors.New("kek must be 32 bytes")
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()

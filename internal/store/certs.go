@@ -67,14 +67,14 @@ var ErrSupersedeNotActive = errors.New("supersede: old cert not found or not act
 func InsertCert(db *sql.DB, c *Cert, k *CertKey) error {
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("InsertCert: begin: %w", err)
+		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := insertCertTx(tx, c, k); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("InsertCert: commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
@@ -90,11 +90,11 @@ func InsertCert(db *sql.DB, c *Cert, k *CertKey) error {
 // initialCRL is nil for leaf issuance and non-nil for CA issuance.
 func IssueCertWithToken(db *sql.DB, c *Cert, k *CertKey, initialCRL *CRL, formToken, resultURL string) error {
 	if formToken == "" {
-		return errors.New("IssueCertWithToken: form token required")
+		return errors.New("form token required")
 	}
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("IssueCertWithToken: begin: %w", err)
+		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := insertCertTx(tx, c, k); err != nil {
@@ -102,14 +102,14 @@ func IssueCertWithToken(db *sql.DB, c *Cert, k *CertKey, initialCRL *CRL, formTo
 	}
 	if initialCRL != nil {
 		if err := InsertCRL(tx, initialCRL); err != nil {
-			return fmt.Errorf("IssueCertWithToken: %w", err)
+			return err
 		}
 	}
 	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
-		return fmt.Errorf("IssueCertWithToken: %w", err)
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("IssueCertWithToken: commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
@@ -126,23 +126,23 @@ func IssueCertWithToken(db *sql.DB, c *Cert, k *CertKey, initialCRL *CRL, formTo
 // time.
 func IssueRotationWithToken(db *sql.DB, newCert *Cert, newKey *CertKey, initialCRL *CRL, oldID, formToken, resultURL string) error {
 	if formToken == "" {
-		return errors.New("IssueRotationWithToken: form token required")
+		return errors.New("form token required")
 	}
 	if oldID == "" {
-		return errors.New("IssueRotationWithToken: oldID required")
+		return errors.New("oldID required")
 	}
 	if newCert == nil {
-		return errors.New("IssueRotationWithToken: newCert required")
+		return errors.New("newCert required")
 	}
 	if newCert.ReplacesID == nil {
-		return errors.New("IssueRotationWithToken: newCert.ReplacesID must be set to oldID")
+		return errors.New("newCert.ReplacesID must be set to oldID")
 	}
 	if *newCert.ReplacesID != oldID {
-		return fmt.Errorf("IssueRotationWithToken: newCert.ReplacesID %q != oldID %q", *newCert.ReplacesID, oldID)
+		return fmt.Errorf("newCert.ReplacesID %q != oldID %q", *newCert.ReplacesID, oldID)
 	}
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("IssueRotationWithToken: begin: %w", err)
+		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := insertCertTx(tx, newCert, newKey); err != nil {
@@ -150,17 +150,17 @@ func IssueRotationWithToken(db *sql.DB, newCert *Cert, newKey *CertKey, initialC
 	}
 	if initialCRL != nil {
 		if err := InsertCRL(tx, initialCRL); err != nil {
-			return fmt.Errorf("IssueRotationWithToken: %w", err)
+			return err
 		}
 	}
 	if err := supersedeOldTx(tx, oldID, newCert.ID); err != nil {
 		return err
 	}
 	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
-		return fmt.Errorf("IssueRotationWithToken: %w", err)
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("IssueRotationWithToken: commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
@@ -188,18 +188,18 @@ func supersedeOldTx(tx sqlcDBTX, oldID, newID string) error {
 // combinators can compose multiple writes atomically.
 func insertCertTx(tx sqlcDBTX, c *Cert, k *CertKey) error {
 	if c == nil || k == nil {
-		return errors.New("insertCertTx: cert and key required")
+		return errors.New("cert and key required")
 	}
 	if c.ID == "" || k.CertID == "" {
-		return errors.New("insertCertTx: cert.ID and key.CertID required")
+		return errors.New("cert.ID and key.CertID required")
 	}
 	if c.ID != k.CertID {
-		return fmt.Errorf("insertCertTx: cert.ID %q != key.CertID %q", c.ID, k.CertID)
+		return fmt.Errorf("cert.ID %q != key.CertID %q", c.ID, k.CertID)
 	}
 
 	q := storedb.New(tx)
 	if err := q.InsertCertificate(context.Background(), certInsertParams(c)); err != nil {
-		return fmt.Errorf("insertCertTx: insert certificates: %w", err)
+		return fmt.Errorf("insert certificates: %w", err)
 	}
 	if err := q.InsertCertKey(context.Background(), storedb.InsertCertKeyParams{
 		CertID:      k.CertID,
@@ -209,7 +209,7 @@ func insertCertTx(tx sqlcDBTX, c *Cert, k *CertKey) error {
 		CipherNonce: k.CipherNonce,
 		Ciphertext:  k.Ciphertext,
 	}); err != nil {
-		return fmt.Errorf("insertCertTx: insert cert_keys: %w", err)
+		return fmt.Errorf("insert cert_keys: %w", err)
 	}
 	return nil
 }
@@ -258,7 +258,7 @@ func GetCert(db sqlcDBTX, id string) (*Cert, error) {
 		return nil, ErrCertNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("GetCert: %w", err)
+		return nil, err
 	}
 	return certFromRow(row)
 }
@@ -293,16 +293,16 @@ func certFromRow(row storedb.Certificate) (*Cert, error) {
 		CreatedAt:         row.CreatedAt,
 	}
 	if err := json.Unmarshal([]byte(row.SanDns), &c.SANDNS); err != nil {
-		return nil, fmt.Errorf("GetCert: unmarshal san_dns: %w", err)
+		return nil, fmt.Errorf("unmarshal san_dns: %w", err)
 	}
 	if err := json.Unmarshal([]byte(row.SanIp), &c.SANIPs); err != nil {
-		return nil, fmt.Errorf("GetCert: unmarshal san_ip: %w", err)
+		return nil, fmt.Errorf("unmarshal san_ip: %w", err)
 	}
 	if err := json.Unmarshal([]byte(row.KeyUsage), &c.KeyUsage); err != nil {
-		return nil, fmt.Errorf("GetCert: unmarshal key_usage: %w", err)
+		return nil, fmt.Errorf("unmarshal key_usage: %w", err)
 	}
 	if err := json.Unmarshal([]byte(row.ExtKeyUsage), &c.ExtKeyUsage); err != nil {
-		return nil, fmt.Errorf("GetCert: unmarshal ext_key_usage: %w", err)
+		return nil, fmt.Errorf("unmarshal ext_key_usage: %w", err)
 	}
 	return c, nil
 }
@@ -311,7 +311,7 @@ func certFromRow(row storedb.Certificate) (*Cert, error) {
 func ListCAs(db sqlcDBTX) ([]*Cert, error) {
 	ids, err := storedb.New(db).ListCAs(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("ListCAs: %w", err)
+		return nil, err
 	}
 	return loadByIDs(db, ids)
 }
@@ -320,7 +320,7 @@ func ListCAs(db sqlcDBTX) ([]*Cert, error) {
 func ListLeaves(db sqlcDBTX) ([]*Cert, error) {
 	ids, err := storedb.New(db).ListLeaves(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("ListLeaves: %w", err)
+		return nil, err
 	}
 	return loadByIDs(db, ids)
 }
@@ -370,7 +370,7 @@ func GetCertKey(db sqlcDBTX, id string) (*CertKey, error) {
 		return nil, ErrCertNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("GetCertKey: %w", err)
+		return nil, err
 	}
 	return &CertKey{
 		CertID:      row.CertID,

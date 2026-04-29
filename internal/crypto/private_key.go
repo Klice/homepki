@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 )
 
@@ -28,24 +29,24 @@ type SealedPrivateKey struct {
 // is zeroed before the function returns. Caller persists all four blobs.
 func SealPrivateKey(kek []byte, certID string, plaintext []byte) (*SealedPrivateKey, error) {
 	if len(kek) != KeyLen {
-		return nil, fmt.Errorf("SealPrivateKey: kek must be %d bytes", KeyLen)
+		return nil, fmt.Errorf("kek must be %d bytes", KeyLen)
 	}
 	if certID == "" {
-		return nil, fmt.Errorf("SealPrivateKey: certID required")
+		return nil, errors.New("certID required")
 	}
 	dek := make([]byte, KeyLen)
 	if _, err := rand.Read(dek); err != nil {
-		return nil, fmt.Errorf("SealPrivateKey: dek gen: %w", err)
+		return nil, fmt.Errorf("dek gen: %w", err)
 	}
 	defer Zero(dek)
 
 	dekNonce, wrappedDEK, err := Seal(kek, dek, []byte(dekAADLabel+certID))
 	if err != nil {
-		return nil, fmt.Errorf("SealPrivateKey: wrap dek: %w", err)
+		return nil, fmt.Errorf("wrap dek: %w", err)
 	}
 	cipherNonce, ciphertext, err := Seal(dek, plaintext, []byte(keyAADLabel+certID))
 	if err != nil {
-		return nil, fmt.Errorf("SealPrivateKey: encrypt key: %w", err)
+		return nil, fmt.Errorf("encrypt key: %w", err)
 	}
 	return &SealedPrivateKey{
 		WrappedDEK:  wrappedDEK,
@@ -61,17 +62,17 @@ func SealPrivateKey(kek []byte, certID string, plaintext []byte) (*SealedPrivate
 // (e.g. via x509.ParsePKCS8PrivateKey) and zeroed promptly.
 func OpenPrivateKey(kek []byte, certID string, sealed *SealedPrivateKey) ([]byte, error) {
 	if len(kek) != KeyLen {
-		return nil, fmt.Errorf("OpenPrivateKey: kek must be %d bytes", KeyLen)
+		return nil, fmt.Errorf("kek must be %d bytes", KeyLen)
 	}
 	if certID == "" {
-		return nil, fmt.Errorf("OpenPrivateKey: certID required")
+		return nil, errors.New("certID required")
 	}
 	if sealed == nil {
-		return nil, fmt.Errorf("OpenPrivateKey: sealed material required")
+		return nil, errors.New("sealed material required")
 	}
 	dek, err := Open(kek, sealed.DEKNonce, sealed.WrappedDEK, []byte(dekAADLabel+certID))
 	if err != nil {
-		return nil, fmt.Errorf("OpenPrivateKey: unwrap dek: %w", err)
+		return nil, fmt.Errorf("unwrap dek: %w", err)
 	}
 	defer Zero(dek)
 	return Open(dek, sealed.CipherNonce, sealed.Ciphertext, []byte(keyAADLabel+certID))

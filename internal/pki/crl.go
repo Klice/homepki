@@ -32,19 +32,19 @@ type CRLRequest struct {
 // CRL written on CA issuance per §6.2).
 func CreateCRL(req CRLRequest) ([]byte, error) {
 	if req.Issuer == nil {
-		return nil, errors.New("CreateCRL: Issuer required")
+		return nil, errors.New("Issuer required")
 	}
 	if req.Issuer.Cert == nil {
-		return nil, errors.New("CreateCRL: Issuer.Cert required")
+		return nil, errors.New("Issuer.Cert required")
 	}
 	if req.Issuer.Key == nil {
-		return nil, errors.New("CreateCRL: Issuer.Key required")
+		return nil, errors.New("Issuer.Key required")
 	}
 	if req.Number == nil || req.Number.Sign() < 0 {
-		return nil, errors.New("CreateCRL: positive Number required")
+		return nil, errors.New("positive Number required")
 	}
 	if !req.NextUpdate.After(req.ThisUpdate) {
-		return nil, fmt.Errorf("CreateCRL: NextUpdate %v must be after ThisUpdate %v", req.NextUpdate, req.ThisUpdate)
+		return nil, fmt.Errorf("NextUpdate %v must be after ThisUpdate %v", req.NextUpdate, req.ThisUpdate)
 	}
 
 	entries := make([]x509.RevocationListEntry, 0, len(req.Entries))

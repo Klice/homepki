@@ -28,16 +28,16 @@ var ErrCRLNotFound = errors.New("crl not found")
 // InsertCRL writes a new CRL row.
 func InsertCRL(db sqlcDBTX, c *CRL) error {
 	if c == nil {
-		return errors.New("InsertCRL: nil")
+		return errors.New("nil")
 	}
 	if c.IssuerCertID == "" {
-		return errors.New("InsertCRL: IssuerCertID required")
+		return errors.New("IssuerCertID required")
 	}
 	if c.CRLNumber <= 0 {
-		return fmt.Errorf("InsertCRL: CRLNumber must be positive, got %d", c.CRLNumber)
+		return fmt.Errorf("CRLNumber must be positive, got %d", c.CRLNumber)
 	}
 	if len(c.DER) == 0 {
-		return errors.New("InsertCRL: DER required")
+		return errors.New("DER required")
 	}
 	err := storedb.New(db).InsertCRL(context.Background(), storedb.InsertCRLParams{
 		IssuerCertID: c.IssuerCertID,
@@ -48,7 +48,7 @@ func InsertCRL(db sqlcDBTX, c *CRL) error {
 		UpdatedAt:    time.Now().UTC(),
 	})
 	if err != nil {
-		return fmt.Errorf("InsertCRL: %w", err)
+		return err
 	}
 	return nil
 }
@@ -64,7 +64,7 @@ func GetLatestCRL(db sqlcDBTX, issuerID string) (*CRL, error) {
 		return nil, ErrCRLNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("GetLatestCRL: %w", err)
+		return nil, err
 	}
 	return &CRL{
 		IssuerCertID: row.IssuerCertID,
@@ -81,7 +81,7 @@ func GetLatestCRL(db sqlcDBTX, issuerID string) (*CRL, error) {
 func NextCRLNumber(db sqlcDBTX, issuerID string) (int64, error) {
 	max, err := storedb.New(db).NextCRLNumber(context.Background(), issuerID)
 	if err != nil {
-		return 0, fmt.Errorf("NextCRLNumber: %w", err)
+		return 0, err
 	}
 	// MAX() returns NULL → interface{} nil → sqlc emits interface{}; we get
 	// 0 from the type-assertion fallback path. Either way, "no rows" → 1.
@@ -91,7 +91,7 @@ func NextCRLNumber(db sqlcDBTX, issuerID string) (int64, error) {
 	case nil:
 		return 1, nil
 	default:
-		return 0, fmt.Errorf("NextCRLNumber: unexpected MAX type %T", v)
+		return 0, fmt.Errorf("unexpected MAX type %T", v)
 	}
 }
 
@@ -102,7 +102,7 @@ func ListRevokedChildren(db sqlcDBTX, issuerID string) ([]RevokedChild, error) {
 	id := issuerID
 	rows, err := storedb.New(db).ListRevokedChildren(context.Background(), &id)
 	if err != nil {
-		return nil, fmt.Errorf("ListRevokedChildren: %w", err)
+		return nil, err
 	}
 	out := make([]RevokedChild, 0, len(rows))
 	for _, r := range rows {
@@ -139,7 +139,7 @@ func MarkRevoked(db sqlcDBTX, certID string, reason int, when time.Time) (int, e
 		ID:               certID,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("MarkRevoked: %w", err)
+		return 0, err
 	}
 	return int(n), nil
 }
