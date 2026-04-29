@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/csrf v1.7.3
+	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.50.0
 	modernc.org/sqlite v1.50.0
 	software.sslmate.com/src/go-pkcs12 v0.7.1
