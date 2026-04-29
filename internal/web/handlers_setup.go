@@ -121,6 +121,7 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		internalServerError(w, "setup-post: issue session", err)
 		return
 	}
+	s.locker.Touch()
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

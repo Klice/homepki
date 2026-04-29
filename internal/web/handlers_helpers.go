@@ -54,6 +54,9 @@ func (s *Server) requireUnlocked(w http.ResponseWriter, r *http.Request) bool {
 		http.Redirect(w, r, "/unlock", http.StatusSeeOther)
 		return false
 	}
+	// LIFECYCLE.md §1.4: a successful authenticated request resets the
+	// idle timer. No-op when auto-lock is disabled.
+	s.locker.Touch()
 	return true
 }
 

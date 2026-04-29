@@ -1,23 +1,33 @@
 # homepki
 
-A small self-hosted web app for managing your own private TLS certificate
-authority. Spin up a root CA, issue certificates for your home lab, your
-internal services, your `*.lan` hosts, and rotate or revoke them when
-you need to — all from one passphrase-protected web UI.
+A small self-hosted **web app** for running your own private TLS
+certificate authority. Issue, rotate, revoke, and download certs;
+configure deploy targets; manage the passphrase — **all from a
+browser**. There is no `homepki` CLI to install: one Docker container
+runs the server and serves the UI.
 
 ## Why you might want this
 
-If you run anything at home that wants HTTPS — a NAS, a router admin
-page, a Home Assistant box, a self-hosted Git server — you've probably
-hit the same wall: Let's Encrypt won't issue for `.lan` or
-`192.168.x.x`, browser warnings get old fast, and `openssl` incantations
-copied from blog posts have a way of going sideways.
+**The reason this project exists: HTTPS for [Tailscale](https://tailscale.com/)
+nodes.** If you've given your tailnet machines friendly names like `nas`,
+`media`, or `pi.tail-scale.ts.net`, Let's Encrypt can't help — those
+names aren't in public DNS. But once you trust a homepki root on each
+device, every internal service over your tailnet gets real HTTPS without
+browser warnings, and the certs use whatever name your devices actually
+respond to: short MagicDNS names, `*.lan` aliases, raw tailnet IPs.
+
+The same problem shows up in plain home labs too — a NAS at `nas.lan`,
+a router admin page on `192.168.x.x`, a Home Assistant box, a
+self-hosted Git server. Let's Encrypt won't issue, browser warnings get
+old fast, and `openssl` incantations copied from blog posts have a way
+of going sideways.
 
 homepki gives you the missing middle:
 
 - One **root CA** you trust on your devices once.
 - **Leaf certs** for individual services, with proper SANs (`nas.lan`,
-  `192.168.1.10`, etc.) and short lifetimes you can actually rotate.
+  `192.168.1.10`, MagicDNS names) and short lifetimes you can actually
+  rotate.
 - **Deploy targets** that drop the cert and key on disk where nginx /
   Caddy / haproxy expect them, optionally running `nginx -s reload` for
   you afterward.
@@ -26,13 +36,6 @@ homepki gives you the missing middle:
 - Encrypted at rest under a passphrase you choose. Lock the app and the
   in-memory key is wiped; private keys on disk become unreadable until
   you unlock again.
-
-It's a great fit for [Tailscale](https://tailscale.com/) networks too.
-If you've given your nodes friendly names like `nas`, `media`, or
-`pi.tail-scale.ts.net`, Let's Encrypt can't help — but homepki can
-issue certs for whatever name your devices actually use, including
-short MagicDNS names and `*.lan` aliases. Trust the root once on each
-device on your tailnet and every internal service gets real HTTPS.
 
 It's deliberately small: one binary, one SQLite file, one operator. No
 ACME server, no multi-tenant CA dashboard. If you want those, use
@@ -48,6 +51,8 @@ matches what you want — `latest` is the most recent stable release,
 
 ### Quick start with Docker
 
+**1. Start the container.**
+
 ```sh
 docker run -d \
   --name homepki \
@@ -57,13 +62,15 @@ docker run -d \
   ghcr.io/klice/homepki:latest
 ```
 
-Then open <http://localhost:8080> in a browser. On first run you'll see
-the **first-run setup** screen — choose a passphrase (≥ 12 characters)
-and confirm it. Write it down somewhere safe; the encrypted keys cannot
-be recovered without it.
+**2. Open the web UI** at <http://localhost:8080> in your browser.
 
-That's it. From the dashboard you can issue your first root CA, then an
-intermediate, then leaf certs for the services you want to protect.
+On first visit you'll see the **first-run setup** screen — choose a
+passphrase (≥ 12 characters) and confirm it. Write it down somewhere
+safe; the encrypted keys cannot be recovered without it.
+
+**3. Issue your first cert chain** from the dashboard: a root CA, then
+an intermediate, then leaf certs for the services you want to protect.
+Everything is point-and-click; no `openssl` required.
 
 ### With Docker Compose
 
@@ -117,6 +124,9 @@ Then:
 ```sh
 docker compose up -d
 ```
+
+Same as the bare-Docker path: open <http://localhost:8080> in your
+browser to reach the web UI.
 
 ### Trusting the root CA on your devices
 

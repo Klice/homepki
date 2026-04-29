@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/Klice/homepki/internal/crypto"
 	"github.com/Klice/homepki/internal/store"
@@ -39,7 +40,10 @@ func (s *Server) handleUnlockGet(w http.ResponseWriter, r *http.Request) {
 // handleUnlockPost verifies the supplied passphrase against the stored
 // verifier and, on match, installs the KEK and issues a session cookie.
 //
-// TODO(LIFECYCLE.md §1.2): in-process backoff after repeated failures.
+// Implements the in-process backoff from LIFECYCLE.md §1.2: after 5 wrong
+// attempts inside a 60s window, each subsequent attempt sleeps an
+// extra 2s (linear, capped at 30s) before responding. A successful unlock
+// clears the counter.
 func (s *Server) handleUnlockPost(w http.ResponseWriter, r *http.Request) {
 	setUp, err := store.IsSetUp(s.db)
 	if err != nil {
@@ -53,6 +57,15 @@ func (s *Server) handleUnlockPost(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		internalServerError(w, "unlock-post: ParseForm", err)
 		return
+	}
+
+	if d := s.backoff.Delay(); d > 0 {
+		select {
+		case <-time.After(d):
+		case <-r.Context().Done():
+			// Client disconnected; abandon. No state change either way.
+			return
+		}
 	}
 
 	pp := r.PostForm.Get("passphrase")
@@ -84,6 +97,7 @@ func (s *Server) handleUnlockPost(w http.ResponseWriter, r *http.Request) {
 
 	kek, err := crypto.DeriveAndVerify([]byte(pp), salt, params, verifier)
 	if errors.Is(err, crypto.ErrPassphraseMismatch) {
+		s.backoff.Failure()
 		s.renderUnlockError(w, r, "Incorrect passphrase.")
 		return
 	}
@@ -100,6 +114,8 @@ func (s *Server) handleUnlockPost(w http.ResponseWriter, r *http.Request) {
 		internalServerError(w, "unlock-post: issue session", err)
 		return
 	}
+	s.backoff.Reset()
+	s.locker.Touch()
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

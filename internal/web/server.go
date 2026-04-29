@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/csrf"
 
@@ -23,6 +24,8 @@ type Server struct {
 	templates map[string]*template.Template
 	mux       *http.ServeMux
 	handler   http.Handler // mux wrapped in middleware
+	locker    *idleLocker  // auto-lock idle timer; no-op when disabled
+	backoff   *unlockBackoff
 }
 
 // New constructs a Server with all routes registered and middleware applied.
@@ -49,6 +52,8 @@ func New(cfg config.Config, db *sql.DB, keystore *crypto.Keystore) (*Server, err
 		keystore:  keystore,
 		templates: tmpls,
 		mux:       http.NewServeMux(),
+		locker:    newIdleLocker(keystore, autoLockTimeout(cfg)),
+		backoff:   newUnlockBackoff(),
 	}
 	s.routes()
 	// Cookie/field names match the existing API contract documented in
@@ -84,6 +89,24 @@ func plaintextHTTPDetect(next http.Handler) http.Handler {
 // ServeHTTP makes Server an http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
+}
+
+// Stop releases server-owned background resources (currently the idle
+// auto-lock timer). Safe to call multiple times. Should be deferred from
+// the process entry point so a graceful shutdown doesn't leak the timer.
+func (s *Server) Stop() {
+	s.locker.Stop()
+}
+
+// autoLockTimeout converts CM_AUTO_LOCK_MINUTES into the timeout fed to
+// idleLocker. Per LIFECYCLE.md §1.4 auto-lock is forced off when
+// CM_PASSPHRASE is set — otherwise the next request would just re-unlock
+// the keystore from the env var.
+func autoLockTimeout(cfg config.Config) time.Duration {
+	if cfg.AutoLockMinutes <= 0 || cfg.Passphrase != "" {
+		return 0
+	}
+	return time.Duration(cfg.AutoLockMinutes) * time.Minute
 }
 
 // routes is the single canonical list of HTTP routes. Handlers live in
