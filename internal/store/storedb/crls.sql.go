@@ -10,6 +10,31 @@ import (
 	"time"
 )
 
+const getCRLByNumber = `-- name: GetCRLByNumber :one
+SELECT issuer_cert_id, crl_number, this_update, next_update, der, updated_at
+FROM crls
+WHERE issuer_cert_id = ? AND crl_number = ?
+`
+
+type GetCRLByNumberParams struct {
+	IssuerCertID string
+	CrlNumber    int64
+}
+
+func (q *Queries) GetCRLByNumber(ctx context.Context, arg GetCRLByNumberParams) (Crl, error) {
+	row := q.db.QueryRowContext(ctx, getCRLByNumber, arg.IssuerCertID, arg.CrlNumber)
+	var i Crl
+	err := row.Scan(
+		&i.IssuerCertID,
+		&i.CrlNumber,
+		&i.ThisUpdate,
+		&i.NextUpdate,
+		&i.Der,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getLatestCRL = `-- name: GetLatestCRL :one
 SELECT issuer_cert_id, crl_number, this_update, next_update, der, updated_at
 FROM crls
@@ -58,6 +83,43 @@ func (q *Queries) InsertCRL(ctx context.Context, arg InsertCRLParams) error {
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const listCRLsByIssuer = `-- name: ListCRLsByIssuer :many
+SELECT issuer_cert_id, crl_number, this_update, next_update, der, updated_at
+FROM crls
+WHERE issuer_cert_id = ?
+ORDER BY crl_number DESC
+`
+
+func (q *Queries) ListCRLsByIssuer(ctx context.Context, issuerCertID string) ([]Crl, error) {
+	rows, err := q.db.QueryContext(ctx, listCRLsByIssuer, issuerCertID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Crl{}
+	for rows.Next() {
+		var i Crl
+		if err := rows.Scan(
+			&i.IssuerCertID,
+			&i.CrlNumber,
+			&i.ThisUpdate,
+			&i.NextUpdate,
+			&i.Der,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const nextCRLNumber = `-- name: NextCRLNumber :one

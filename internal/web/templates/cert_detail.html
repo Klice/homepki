@@ -130,7 +130,21 @@
     {{if eq .View.Type "leaf"}}
     <li><a href="/certs/{{.View.ID}}/fullchain.pem">fullchain.pem</a> <small>— this cert followed by the chain</small></li>
     {{end}}
+    {{if .View.IsCA}}
+    <li><a href="/crl/{{.View.ID}}.crl">latest.crl</a> <small>— current CRL (also at the public CRL distribution URL baked into issued certs)</small></li>
+    {{end}}
   </ul>
+
+  {{if .View.IsCA}}
+  <h3 style="font-size: 0.95rem; font-weight: 500;">CRL history</h3>
+  <p>
+    <a href="/certs/{{.View.ID}}/crls">View every signed CRL snapshot →</a>
+    <small style="display: block; color: var(--pico-muted-color); margin-top: 0.25rem;">
+      Each revocation regenerates the CRL with a new monotonic number; old
+      snapshots are kept so historical verification still works.
+    </small>
+  </p>
+  {{end}}
 
   {{if eq .View.Type "leaf"}}
   <details>

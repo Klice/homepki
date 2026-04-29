@@ -1,0 +1,63 @@
+{{define "title"}}CRL history — {{.View.SubjectCN}}{{end}}
+
+{{define "header_actions"}}
+<nav>
+  <ul>
+    <li><span class="pill pill-ok">unlocked</span></li>
+    <li><a href="/certs/{{.View.ID}}">← Back to {{.View.SubjectCN}}</a></li>
+    <li>
+      <form method="post" action="/lock" style="margin: 0;">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit" class="secondary outline">Lock</button>
+      </form>
+    </li>
+  </ul>
+</nav>
+{{end}}
+
+{{define "content"}}
+<article>
+  <header>
+    <h2 style="margin-bottom: 0.25rem;">CRL history</h2>
+    <small>For {{.View.Type}} <strong>{{.View.SubjectCN}}</strong></small>
+  </header>
+
+  <p>
+    <small>
+      Each row is a signed snapshot of this CA's revocation list at one
+      point in time. The latest row is the one served by the public
+      <a href="/crl/{{.View.ID}}.crl"><code>/crl/{{.View.ID}}.crl</code></a>
+      endpoint; older snapshots are immutable and downloadable here in case
+      a verifier needs to check a cert against a historical revocation set.
+    </small>
+  </p>
+
+  {{if .CRLs}}
+  <table>
+    <thead>
+      <tr>
+        <th>Number</th>
+        <th>This update</th>
+        <th>Next update</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .CRLs}}
+      <tr>
+        <td>
+          <strong>{{.Number}}</strong>
+          {{if .IsLatest}}<span class="pill pill-ok" style="margin-left: 0.5rem;">latest</span>{{end}}
+        </td>
+        <td><small>{{.ThisUpdate}}</small></td>
+        <td><small>{{.NextUpdate}}</small></td>
+        <td><a href="{{.DownloadURL}}">download .crl</a></td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p><small>No CRLs issued yet — this CA was just created.</small></p>
+  {{end}}
+</article>
+{{end}}
