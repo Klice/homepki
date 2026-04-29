@@ -6,6 +6,8 @@ configure deploy targets; manage the passphrase — **all from a
 browser**. There is no `homepki` CLI to install: one Docker container
 runs the server and serves the UI.
 
+![homepki web UI](./img/screenshot-1.png)
+
 ## Why you might want this
 
 **The reason this project exists: HTTPS for [Tailscale](https://tailscale.com/)
