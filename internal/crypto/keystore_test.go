@@ -127,24 +127,20 @@ func TestKeystore_ConcurrentAccess(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			_ = k.With(func(kek []byte) error {
 				if len(kek) != KeyLen {
 					t.Errorf("With saw kek of length %d", len(kek))
 				}
 				return nil
 			})
-		}()
+		})
 	}
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 5 {
+		wg.Go(func() {
 			_ = k.IsUnlocked()
-		}()
+		})
 	}
 	wg.Wait()
 }

@@ -258,4 +258,3 @@ func sha256Hex(b []byte) string {
 	}
 	return string(out)
 }
-

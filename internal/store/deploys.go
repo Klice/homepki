@@ -55,13 +55,16 @@ func NewDeployTargetID() string {
 // Caller is responsible for setting t.ID and t.CertID.
 func InsertDeployTarget(db sqlcDBTX, t *DeployTarget) error {
 	if t == nil {
-		return errors.New("InsertDeployTarget: target required")
+		return errors.New("target required")
 	}
-	if t.ID == "" || t.CertID == "" {
-		return errors.New("InsertDeployTarget: ID and CertID required")
+	if t.ID == "" {
+		return errors.New("ID required")
+	}
+	if t.CertID == "" {
+		return errors.New("CertID required")
 	}
 	if err := storedb.New(db).InsertDeployTarget(context.Background(), insertParams(t)); err != nil {
-		return fmt.Errorf("InsertDeployTarget: %w", err)
+		return err
 	}
 	return nil
 }
@@ -71,21 +74,21 @@ func InsertDeployTarget(db sqlcDBTX, t *DeployTarget) error {
 // LookupIdemToken in the next request.
 func CreateDeployTargetWithToken(db *sql.DB, t *DeployTarget, formToken, resultURL string) error {
 	if formToken == "" {
-		return errors.New("CreateDeployTargetWithToken: form token required")
+		return errors.New("form token required")
 	}
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("CreateDeployTargetWithToken: begin: %w", err)
+		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := InsertDeployTarget(tx, t); err != nil {
 		return err
 	}
 	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
-		return fmt.Errorf("CreateDeployTargetWithToken: %w", err)
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("CreateDeployTargetWithToken: commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
@@ -95,12 +98,18 @@ func CreateDeployTargetWithToken(db *sql.DB, t *DeployTarget, formToken, resultU
 // the row level — a failed rename in the runner won't leave the metadata
 // half-updated.
 func UpdateDeployTarget(db sqlcDBTX, t *DeployTarget) error {
-	if t == nil || t.ID == "" || t.CertID == "" {
-		return errors.New("UpdateDeployTarget: ID and CertID required")
+	if t == nil {
+		return errors.New("target required")
+	}
+	if t.ID == "" {
+		return errors.New("ID required")
+	}
+	if t.CertID == "" {
+		return errors.New("CertID required")
 	}
 	n, err := storedb.New(db).UpdateDeployTarget(context.Background(), updateParams(t))
 	if err != nil {
-		return fmt.Errorf("UpdateDeployTarget: %w", err)
+		return err
 	}
 	if n == 0 {
 		return ErrDeployTargetNotFound
@@ -113,21 +122,21 @@ func UpdateDeployTarget(db sqlcDBTX, t *DeployTarget) error {
 // MarkIdemTokenUsed.
 func UpdateDeployTargetWithToken(db *sql.DB, t *DeployTarget, formToken, resultURL string) error {
 	if formToken == "" {
-		return errors.New("UpdateDeployTargetWithToken: form token required")
+		return errors.New("form token required")
 	}
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("UpdateDeployTargetWithToken: begin: %w", err)
+		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := UpdateDeployTarget(tx, t); err != nil {
 		return err
 	}
 	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
-		return fmt.Errorf("UpdateDeployTargetWithToken: %w", err)
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("UpdateDeployTargetWithToken: commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
@@ -140,7 +149,7 @@ func GetDeployTarget(db sqlcDBTX, id string) (*DeployTarget, error) {
 		return nil, ErrDeployTargetNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("GetDeployTarget: %w", err)
+		return nil, err
 	}
 	return targetFromRow(row), nil
 }
@@ -150,7 +159,7 @@ func GetDeployTarget(db sqlcDBTX, id string) (*DeployTarget, error) {
 func ListDeployTargets(db sqlcDBTX, certID string) ([]*DeployTarget, error) {
 	rows, err := storedb.New(db).ListDeployTargetsByCertID(context.Background(), certID)
 	if err != nil {
-		return nil, fmt.Errorf("ListDeployTargets: %w", err)
+		return nil, err
 	}
 	out := make([]*DeployTarget, 0, len(rows))
 	for _, r := range rows {
@@ -168,7 +177,7 @@ func DeleteDeployTarget(db sqlcDBTX, id, certID string) error {
 		CertID: certID,
 	})
 	if err != nil {
-		return fmt.Errorf("DeleteDeployTarget: %w", err)
+		return err
 	}
 	return nil
 }
@@ -178,7 +187,7 @@ func DeleteDeployTarget(db sqlcDBTX, id, certID string) error {
 // Per STORAGE.md §5.6 last_status is constrained to "ok"/"failed" only.
 func RecordDeployRun(db sqlcDBTX, id string, status DeployStatus, serial, errMsg string, when time.Time) error {
 	if status != DeployStatusOK && status != DeployStatusFailed {
-		return fmt.Errorf("RecordDeployRun: invalid status %q", status)
+		return fmt.Errorf("invalid status %q", status)
 	}
 	statusStr := string(status)
 	var serialPtr, errPtr *string
@@ -196,7 +205,7 @@ func RecordDeployRun(db sqlcDBTX, id string, status DeployStatus, serial, errMsg
 		ID:                 id,
 	})
 	if err != nil {
-		return fmt.Errorf("RecordDeployRun: %w", err)
+		return err
 	}
 	if n == 0 {
 		return ErrDeployTargetNotFound

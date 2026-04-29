@@ -297,8 +297,8 @@ func TestCertDetail_RendersDownloadLinks(t *testing.T) {
 	_, c, rootID, interID, leafID := downloadFixture(t)
 
 	for _, tc := range []struct {
-		id     string
-		want   []string
+		id      string
+		want    []string
 		notWant []string
 	}{
 		{

@@ -17,10 +17,10 @@ const SaltLen = 16
 //
 // See LIFECYCLE.md §1.1 for the v1 defaults.
 type KDFParams struct {
-	Time    uint32 `json:"time"`     // iterations
-	Memory  uint32 `json:"memory"`   // KiB
-	Threads uint8  `json:"threads"`  // parallelism
-	KeyLen  uint32 `json:"key_len"`  // output length in bytes
+	Time    uint32 `json:"time"`    // iterations
+	Memory  uint32 `json:"memory"`  // KiB
+	Threads uint8  `json:"threads"` // parallelism
+	KeyLen  uint32 `json:"key_len"` // output length in bytes
 }
 
 // DefaultKDFParams returns the v1 Argon2id defaults: time=3, memory=64 MiB,
@@ -48,16 +48,22 @@ func NewSalt() ([]byte, error) {
 // responsible for zeroing it when no longer needed.
 func DeriveKEK(passphrase, salt []byte, p KDFParams) ([]byte, error) {
 	if len(passphrase) == 0 {
-		return nil, errors.New("DeriveKEK: passphrase is empty")
+		return nil, errors.New("passphrase is empty")
 	}
 	if len(salt) == 0 {
-		return nil, errors.New("DeriveKEK: salt is empty")
+		return nil, errors.New("salt is empty")
 	}
 	if p.KeyLen == 0 {
-		return nil, errors.New("DeriveKEK: KeyLen must be > 0")
+		return nil, errors.New("KeyLen must be > 0")
 	}
-	if p.Time == 0 || p.Memory == 0 || p.Threads == 0 {
-		return nil, errors.New("DeriveKEK: KDFParams Time, Memory, and Threads must all be > 0")
+	if p.Time == 0 {
+		return nil, errors.New("Time must be > 0")
+	}
+	if p.Memory == 0 {
+		return nil, errors.New("Memory must be > 0")
+	}
+	if p.Threads == 0 {
+		return nil, errors.New("Threads must be > 0")
 	}
 	return argon2.IDKey(passphrase, salt, p.Time, p.Memory, p.Threads, p.KeyLen), nil
 }

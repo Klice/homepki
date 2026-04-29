@@ -14,15 +14,15 @@ import (
 
 // Defaults per LIFECYCLE.md §4.3.
 const (
-	defaultRootValidityDays    = 10 * 365 // 10 years
-	defaultIntValidityDays     = 5 * 365  // 5 years
-	defaultLeafValidityDays    = 90       // 3 months
-	defaultRootKeyAlgo         = string(pki.RSA)
-	defaultRootKeyAlgoParams   = "4096"
-	defaultIntKeyAlgo          = string(pki.ECDSA)
-	defaultIntKeyAlgoParams    = "P-384"
-	defaultLeafKeyAlgo         = string(pki.ECDSA)
-	defaultLeafKeyAlgoParams   = "P-256"
+	defaultRootValidityDays  = 10 * 365 // 10 years
+	defaultIntValidityDays   = 5 * 365  // 5 years
+	defaultLeafValidityDays  = 90       // 3 months
+	defaultRootKeyAlgo       = string(pki.RSA)
+	defaultRootKeyAlgoParams = "4096"
+	defaultIntKeyAlgo        = string(pki.ECDSA)
+	defaultIntKeyAlgoParams  = "P-384"
+	defaultLeafKeyAlgo       = string(pki.ECDSA)
+	defaultLeafKeyAlgoParams = "P-256"
 )
 
 // issueViewData is the data for all three issue forms; the template chooses
@@ -382,10 +382,11 @@ func validateCommon(d issueViewData) string {
 }
 
 func parseSANDNS(input string) []string {
-	var out []string
-	for _, s := range strings.FieldsFunc(input, func(r rune) bool {
+	fields := strings.FieldsFunc(input, func(r rune) bool {
 		return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t'
-	}) {
+	})
+	out := make([]string, 0, len(fields))
+	for _, s := range fields {
 		s = strings.TrimSpace(s)
 		if s != "" {
 			out = append(out, s)
@@ -395,11 +396,12 @@ func parseSANDNS(input string) []string {
 }
 
 func parseSANIPs(input string) ([]net.IP, error) {
-	var out []net.IP
-	for _, s := range parseSANDNS(input) {
+	dns := parseSANDNS(input)
+	out := make([]net.IP, 0, len(dns))
+	for _, s := range dns {
 		ip := net.ParseIP(s)
 		if ip == nil {
-			return nil, fmt.Errorf("Not a valid IP address: %q", s)
+			return nil, fmt.Errorf("not a valid IP address: %q", s)
 		}
 		out = append(out, ip)
 	}

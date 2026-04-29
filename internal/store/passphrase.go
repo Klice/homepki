@@ -31,40 +31,46 @@ type RotatePassphraseInputs struct {
 // RotatePassphrase performs the rewrap-all-DEKs transaction described in
 // LIFECYCLE.md §1.6 / STORAGE.md §7. In one DEFERRED tx:
 //
-//   1. Stream every cert_keys row, call rewrap to produce the new
-//      (wrapped_dek, dek_nonce), update the row.
-//   2. Write kdf_salt, kdf_params, passphrase_verifier into settings.
-//   3. Mark the form token used.
+//  1. Stream every cert_keys row, call rewrap to produce the new
+//     (wrapped_dek, dek_nonce), update the row.
+//  2. Write kdf_salt, kdf_params, passphrase_verifier into settings.
+//  3. Mark the form token used.
 //
 // The transaction rolls back if any rewrap returns an error, leaving the
 // store in its pre-rotation state. The caller is responsible for swapping
 // the in-memory KEK only after this returns nil.
 func RotatePassphrase(db *sql.DB, in RotatePassphraseInputs, rewrap RewrapFunc, formToken, resultURL string) error {
 	if formToken == "" {
-		return errors.New("RotatePassphrase: form token required")
+		return errors.New("form token required")
 	}
 	if rewrap == nil {
-		return errors.New("RotatePassphrase: rewrap callback required")
+		return errors.New("rewrap callback required")
 	}
-	if len(in.NewSalt) == 0 || len(in.NewParamsJSON) == 0 || len(in.NewVerifier) == 0 {
-		return errors.New("RotatePassphrase: salt, params, and verifier required")
+	if len(in.NewSalt) == 0 {
+		return errors.New("NewSalt required")
+	}
+	if len(in.NewParamsJSON) == 0 {
+		return errors.New("NewParamsJSON required")
+	}
+	if len(in.NewVerifier) == 0 {
+		return errors.New("NewVerifier required")
 	}
 
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("RotatePassphrase: begin: %w", err)
+		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	q := storedb.New(tx)
 	rows, err := q.ListCertKeyWraps(context.Background())
 	if err != nil {
-		return fmt.Errorf("RotatePassphrase: list cert_keys: %w", err)
+		return fmt.Errorf("list cert_keys: %w", err)
 	}
 	for _, r := range rows {
 		newWrapped, newNonce, err := rewrap(r.CertID, r.WrappedDek, r.DekNonce)
 		if err != nil {
-			return fmt.Errorf("RotatePassphrase: rewrap %s: %w", r.CertID, err)
+			return fmt.Errorf("rewrap %s: %w", r.CertID, err)
 		}
 		n, err := q.UpdateCertKeyWrap(context.Background(), storedb.UpdateCertKeyWrapParams{
 			WrappedDek: newWrapped,
@@ -72,10 +78,10 @@ func RotatePassphrase(db *sql.DB, in RotatePassphraseInputs, rewrap RewrapFunc, 
 			CertID:     r.CertID,
 		})
 		if err != nil {
-			return fmt.Errorf("RotatePassphrase: update wrap %s: %w", r.CertID, err)
+			return fmt.Errorf("update wrap %s: %w", r.CertID, err)
 		}
 		if n != 1 {
-			return fmt.Errorf("RotatePassphrase: update wrap %s: rows affected = %d", r.CertID, n)
+			return fmt.Errorf("update wrap %s: rows affected = %d", r.CertID, n)
 		}
 	}
 
@@ -88,16 +94,16 @@ func RotatePassphrase(db *sql.DB, in RotatePassphraseInputs, rewrap RewrapFunc, 
 		{SettingPassphraseVerifier, in.NewVerifier},
 	} {
 		if err := SetSetting(tx, kv.key, kv.value); err != nil {
-			return fmt.Errorf("RotatePassphrase: write %s: %w", kv.key, err)
+			return fmt.Errorf("write %s: %w", kv.key, err)
 		}
 	}
 
 	if err := MarkIdemTokenUsed(tx, formToken, resultURL); err != nil {
-		return fmt.Errorf("RotatePassphrase: mark token: %w", err)
+		return fmt.Errorf("mark token: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("RotatePassphrase: commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }

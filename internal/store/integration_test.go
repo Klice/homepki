@@ -6,8 +6,8 @@ package store_test
 // through "retrieve + decrypt" and verifies the chain end to end.
 
 import (
-	stdcrypto "crypto"
 	"bytes"
+	stdcrypto "crypto"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"

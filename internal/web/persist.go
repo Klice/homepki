@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"time"
 
 	"github.com/Klice/homepki/internal/crypto"
@@ -108,6 +109,7 @@ func buildInitialCRL(certID string, issued *pki.Issued) (*store.CRL, error) {
 //   - inserts the new cert + key (+ CRL)
 //   - flips the old cert to superseded with replaced_by_id = new id
 //   - marks the form token used
+//
 // Returns the new cert id. Per LIFECYCLE.md §4.2/§4.3.
 func (s *Server) persistRotation(certType string, parentID *string, oldID string, issued *pki.Issued, keySpec pki.KeySpec, formToken string) (string, error) {
 	pkcs8, err := x509.MarshalPKCS8PrivateKey(issued.Key)
@@ -209,9 +211,8 @@ func certFromIssued(id, certType string, parentID *string, issued *pki.Issued, k
 	c := issued.Cert
 	fp := sha256.Sum256(issued.DER)
 
-	var sanDNS []string
-	sanDNS = append(sanDNS, c.DNSNames...)
-	var sanIPs []string
+	sanDNS := slices.Clone(c.DNSNames)
+	sanIPs := make([]string, 0, len(c.IPAddresses))
 	for _, ip := range c.IPAddresses {
 		sanIPs = append(sanIPs, ip.String())
 	}

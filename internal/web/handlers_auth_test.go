@@ -46,10 +46,10 @@ var csrfFormFieldRE = regexp.MustCompile(`name="` + csrfFormField + `"\s+value="
 // between calls so a sequence of requests behaves like a single browser
 // session.
 type clientLite struct {
-	t        *testing.T
-	srv      http.Handler
-	cookies  map[string]*http.Cookie
-	csrfTok  string // most recent token extracted from a rendered form
+	t       *testing.T
+	srv     http.Handler
+	cookies map[string]*http.Cookie
+	csrfTok string // most recent token extracted from a rendered form
 }
 
 func newClient(t *testing.T, srv http.Handler) *clientLite {
