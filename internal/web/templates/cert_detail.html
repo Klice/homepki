@@ -91,10 +91,10 @@
   </p>
   {{end}}
 
-  {{if and (ne .View.Status "revoked") (ne .View.Status "superseded")}}
+  {{if ne .View.Status "revoked"}}
   <h3 style="font-size: 0.95rem; font-weight: 500;">Revoke</h3>
   <details>
-    <summary>Revoke this certificate</summary>
+    <summary role="button" class="contrast outline">Revoke this certificate</summary>
     <form method="post" action="/certs/{{.View.ID}}/revoke" style="margin-top: 0.5rem;">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <label>Reason
@@ -109,11 +109,12 @@
           {{if .View.IsCA}}<option value="10">AA compromise</option>{{end}}
         </select>
       </label>
-      <button type="submit" class="contrast outline" style="margin-top: 0.5rem;">
+      <button type="submit" class="contrast" style="margin-top: 0.5rem;">
         Revoke
       </button>
       <small style="display: block; color: var(--pico-muted-color); margin-top: 0.5rem;">
         Adds this cert to its issuer's CRL on the next regeneration. Revocation is permanent.
+        {{if eq .View.Status "superseded"}}This cert is superseded by a successor; revoking it now puts the old serial on the CRL.{{end}}
       </small>
     </form>
   </details>
@@ -133,7 +134,7 @@
 
   {{if eq .View.Type "leaf"}}
   <details>
-    <summary>PKCS#12 bundle (key + leaf + chain)</summary>
+    <summary role="button" class="secondary outline">PKCS#12 bundle (key + leaf + chain)</summary>
     <form method="post" action="/certs/{{.View.ID}}/bundle.p12" style="margin-top: 0.5rem;">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <label>Bundle password
