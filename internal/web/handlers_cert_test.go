@@ -9,9 +9,11 @@ import (
 	"database/sql"
 	"math/big"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Klice/homepki/internal/store"
 )
@@ -24,21 +26,15 @@ func seedCertsForBrowse(t *testing.T, db *sql.DB) (rootID, interID, leafID strin
 	now := time.Now()
 
 	root := minimalCert(t, rootID, "root_ca", nil, "Test Root", now, 365*24*time.Hour)
-	if err := store.InsertCert(db, root.cert, root.key); err != nil {
-		t.Fatalf("InsertCert root: %v", err)
-	}
+	require.NoError(t, store.InsertCert(db, root.cert, root.key), "InsertCert root")
 	rid := rootID
 	inter := minimalCert(t, interID, "intermediate_ca", &rid, "Test Intermediate", now, 180*24*time.Hour)
-	if err := store.InsertCert(db, inter.cert, inter.key); err != nil {
-		t.Fatalf("InsertCert intermediate: %v", err)
-	}
+	require.NoError(t, store.InsertCert(db, inter.cert, inter.key), "InsertCert intermediate")
 	iid := interID
 	leaf := minimalCert(t, leafID, "leaf", &iid, "leaf.test", now, 90*24*time.Hour)
 	leaf.cert.SANDNS = []string{"leaf.test", "alt.leaf.test"}
 	leaf.cert.SANIPs = []string{"10.0.0.1"}
-	if err := store.InsertCert(db, leaf.cert, leaf.key); err != nil {
-		t.Fatalf("InsertCert leaf: %v", err)
-	}
+	require.NoError(t, store.InsertCert(db, leaf.cert, leaf.key), "InsertCert leaf")
 	return rootID, interID, leafID
 }
 
@@ -63,9 +59,7 @@ func minimalCert(t *testing.T, id, ctype string, parentID *string, cn string, no
 	}
 	priv := mustEd25519Key(t)
 	der, err := x509.CreateCertificate(nil, tmpl, tmpl, priv.Public(), priv)
-	if err != nil {
-		t.Fatalf("CreateCertificate: %v", err)
-	}
+	require.NoError(t, err, "CreateCertificate")
 	hash := sha256Hex(der)
 	c := &store.Cert{
 		ID:                id,
@@ -96,9 +90,7 @@ func minimalCert(t *testing.T, id, ctype string, parentID *string, cn string, no
 func mustEd25519Key(t *testing.T) stdcrypto.Signer {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("ed25519 keygen: %v", err)
-	}
+	require.NoError(t, err, "ed25519 keygen")
 	return priv
 }
 
@@ -113,9 +105,7 @@ func TestIndex_RendersCAsAndLeavesFromStore(t *testing.T) {
 	installSession(t, srv, c)
 
 	w := c.get("/")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: got %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 	for _, want := range []string{
 		`href="/certs/` + rootID + `"`,
@@ -128,9 +118,7 @@ func TestIndex_RendersCAsAndLeavesFromStore(t *testing.T) {
 		"Authorities",
 		"Leaf certificates",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q", want)
-		}
+		assert.Contains(t, body, want)
 	}
 }
 
@@ -142,16 +130,10 @@ func TestIndex_EmptyState(t *testing.T) {
 	installSession(t, srv, c)
 
 	w := c.get("/")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	if !strings.Contains(body, "No authorities yet") {
-		t.Errorf("expected 'No authorities yet' in empty state body")
-	}
-	if !strings.Contains(body, "No leaf certificates yet") {
-		t.Errorf("expected 'No leaf certificates yet' in empty state body")
-	}
+	assert.Contains(t, body, "No authorities yet")
+	assert.Contains(t, body, "No leaf certificates yet")
 }
 
 // ---- detail ----
@@ -165,9 +147,7 @@ func TestCertDetail_RendersChain(t *testing.T) {
 	installSession(t, srv, c)
 
 	w := c.get("/certs/" + leafID)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 	for _, want := range []string{
 		"leaf.test",
@@ -181,9 +161,7 @@ func TestCertDetail_RendersChain(t *testing.T) {
 		// Fingerprint formatted with colons.
 		":",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q", want)
-		}
+		assert.Contains(t, body, want)
 	}
 }
 
@@ -196,12 +174,8 @@ func TestCertDetail_RootShowsSelfSigned(t *testing.T) {
 	installSession(t, srv, c)
 
 	w := c.get("/certs/" + rootID)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "self-signed") {
-		t.Errorf("root detail should mention self-signed")
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "self-signed")
 }
 
 func TestCertDetail_NotFound(t *testing.T) {
@@ -212,9 +186,7 @@ func TestCertDetail_NotFound(t *testing.T) {
 	installSession(t, srv, c)
 
 	w := c.get("/certs/no-such-id")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status: got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestCertDetail_RedirectsWhenLocked(t *testing.T) {
@@ -225,9 +197,8 @@ func TestCertDetail_RedirectsWhenLocked(t *testing.T) {
 
 	c := newClient(t, srv)
 	w := c.get("/certs/" + leafID)
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 // ---- helpers ----
@@ -237,13 +208,9 @@ func TestCertDetail_RedirectsWhenLocked(t *testing.T) {
 func installSession(t *testing.T, srv *Server, c *clientLite) {
 	t.Helper()
 	secret, err := srv.keystore.DeriveSessionSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	value, err := SignSession(secret)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	c.cookies[SessionCookieName] = &http.Cookie{Name: SessionCookieName, Value: value}
 }
 

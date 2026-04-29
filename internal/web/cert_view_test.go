@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Klice/homepki/internal/store"
+	"github.com/stretchr/testify/assert"
 )
 
 func mkCert(cn string, parentID *string, status string, notAfter time.Time) *store.Cert {
@@ -38,9 +39,7 @@ func TestEffectiveStatus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := mkCert("x", nil, tc.status, tc.na)
-			if got := effectiveStatus(c, now); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
-			}
+			assert.Equal(t, tc.want, effectiveStatus(c, now))
 		})
 	}
 }
@@ -55,9 +54,7 @@ func TestPillClass(t *testing.T) {
 		"weird":      "",
 	}
 	for status, want := range cases {
-		if got := pillClass(status); got != want {
-			t.Errorf("pillClass(%q): got %q, want %q", status, got, want)
-		}
+		assert.Equal(t, want, pillClass(status), "pillClass(%q)", status)
 	}
 }
 
@@ -77,9 +74,7 @@ func TestRelativeExpiry(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := relativeExpiry(tc.notAfter, now); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
-			}
+			assert.Equal(t, tc.want, relativeExpiry(tc.notAfter, now))
 		})
 	}
 }
@@ -94,9 +89,7 @@ func TestFormatKey(t *testing.T) {
 		{"unknown", "x", "unknown"},
 	}
 	for _, tc := range cases {
-		if got := formatKey(tc.algo, tc.params); got != tc.want {
-			t.Errorf("formatKey(%q,%q): got %q, want %q", tc.algo, tc.params, got, tc.want)
-		}
+		assert.Equal(t, tc.want, formatKey(tc.algo, tc.params), "formatKey(%q,%q)", tc.algo, tc.params)
 	}
 }
 
@@ -114,25 +107,16 @@ func TestNewCertView_IssuerLookup(t *testing.T) {
 
 	t.Run("root shows self", func(t *testing.T) {
 		v := newCertView(root, cnByID, now)
-		if v.IssuerCN != "— self —" {
-			t.Errorf("root issuer: got %q", v.IssuerCN)
-		}
+		assert.Equal(t, "— self —", v.IssuerCN, "root issuer")
 	})
 	t.Run("leaf shows parent CN from lookup", func(t *testing.T) {
 		v := newCertView(leaf, cnByID, now)
-		if v.IssuerCN != "Issuing CA" {
-			t.Errorf("leaf issuer: got %q", v.IssuerCN)
-		}
-		want := "leaf.test, alt.leaf.test, 10.0.0.1"
-		if v.SANsDisplay != want {
-			t.Errorf("SANs: got %q, want %q", v.SANsDisplay, want)
-		}
+		assert.Equal(t, "Issuing CA", v.IssuerCN, "leaf issuer")
+		assert.Equal(t, "leaf.test, alt.leaf.test, 10.0.0.1", v.SANsDisplay, "SANs")
 	})
 	t.Run("missing parent falls back to id", func(t *testing.T) {
 		ghost := mkCert("orphan", &parentID, "active", now.Add(60*24*time.Hour))
 		v := newCertView(ghost, map[string]string{}, now)
-		if v.IssuerCN != parentID {
-			t.Errorf("orphan: got %q, want %q", v.IssuerCN, parentID)
-		}
+		assert.Equal(t, parentID, v.IssuerCN, "orphan")
 	})
 }

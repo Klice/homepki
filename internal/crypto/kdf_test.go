@@ -2,8 +2,10 @@ package crypto
 
 import (
 	"bytes"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fastKDFParams returns Argon2id params low enough that tests don't grind for
@@ -14,26 +16,16 @@ func fastKDFParams() KDFParams {
 
 func TestDefaultKDFParams(t *testing.T) {
 	p := DefaultKDFParams()
-	if p.Time != 3 || p.Memory != 64*1024 || p.Threads != 2 || p.KeyLen != 32 {
-		t.Errorf("unexpected defaults: %+v", p)
-	}
+	assert.Equal(t, KDFParams{Time: 3, Memory: 64 * 1024, Threads: 2, KeyLen: 32}, p)
 }
 
 func TestNewSalt(t *testing.T) {
 	a, err := NewSalt()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(a) != SaltLen {
-		t.Errorf("len: got %d, want %d", len(a), SaltLen)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, SaltLen, len(a))
 	b, err := NewSalt()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Equal(a, b) {
-		t.Error("two consecutive NewSalt() returned identical bytes — RNG is broken")
-	}
+	require.NoError(t, err)
+	assert.False(t, bytes.Equal(a, b), "two consecutive NewSalt() returned identical bytes — RNG is broken")
 }
 
 func TestDeriveKEK_Deterministic(t *testing.T) {
@@ -42,19 +34,11 @@ func TestDeriveKEK_Deterministic(t *testing.T) {
 	p := fastKDFParams()
 
 	a, err := DeriveKEK(pw, salt, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	b, err := DeriveKEK(pw, salt, p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(a, b) {
-		t.Error("DeriveKEK is not deterministic for identical inputs")
-	}
-	if len(a) != int(p.KeyLen) {
-		t.Errorf("output length: got %d, want %d", len(a), p.KeyLen)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, a, b, "DeriveKEK is not deterministic for identical inputs")
+	assert.Equal(t, int(p.KeyLen), len(a))
 }
 
 func TestDeriveKEK_DifferentSaltDifferentKey(t *testing.T) {
@@ -62,16 +46,10 @@ func TestDeriveKEK_DifferentSaltDifferentKey(t *testing.T) {
 	p := fastKDFParams()
 
 	a, err := DeriveKEK(pw, []byte("0123456789abcdef"), p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	b, err := DeriveKEK(pw, []byte("fedcba9876543210"), p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Equal(a, b) {
-		t.Error("different salts produced identical KEKs")
-	}
+	require.NoError(t, err)
+	assert.False(t, bytes.Equal(a, b), "different salts produced identical KEKs")
 }
 
 func TestDeriveKEK_DifferentPassphraseDifferentKey(t *testing.T) {
@@ -79,16 +57,10 @@ func TestDeriveKEK_DifferentPassphraseDifferentKey(t *testing.T) {
 	p := fastKDFParams()
 
 	a, err := DeriveKEK([]byte("first passphrase"), salt, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	b, err := DeriveKEK([]byte("second passphrase"), salt, p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Equal(a, b) {
-		t.Error("different passphrases produced identical KEKs")
-	}
+	require.NoError(t, err)
+	assert.False(t, bytes.Equal(a, b), "different passphrases produced identical KEKs")
 }
 
 func TestDeriveKEK_RejectsEmptyInputs(t *testing.T) {
@@ -110,12 +82,8 @@ func TestDeriveKEK_RejectsEmptyInputs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := DeriveKEK(tc.passphrase, tc.salt, tc.params)
-			if err == nil {
-				t.Fatalf("expected error containing %q, got nil", tc.want)
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("error %q does not contain %q", err.Error(), tc.want)
-			}
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tc.want)
 		})
 	}
 }

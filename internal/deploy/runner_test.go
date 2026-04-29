@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/Klice/homepki/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func ptr(s string) *string { return &s }
@@ -38,17 +40,11 @@ func TestRun_WritesCertAndKey(t *testing.T) {
 	dir := t.TempDir()
 	tgt := minimalTarget(dir)
 	res := Run(t.Context(), tgt, sampleBytes())
-	if res.Status != store.DeployStatusOK {
-		t.Fatalf("status=%v err=%q", res.Status, res.Err)
-	}
+	require.Equal(t, store.DeployStatusOK, res.Status, "err=%q", res.Err)
 	got, _ := os.ReadFile(tgt.CertPath)
-	if !strings.Contains(string(got), "AAA") {
-		t.Errorf("cert: %q", got)
-	}
+	assert.Contains(t, string(got), "AAA")
 	got, _ = os.ReadFile(tgt.KeyPath)
-	if !strings.Contains(string(got), "BBB") {
-		t.Errorf("key: %q", got)
-	}
+	assert.Contains(t, string(got), "BBB")
 }
 
 func TestRun_AppliesMode(t *testing.T) {
@@ -56,17 +52,11 @@ func TestRun_AppliesMode(t *testing.T) {
 	tgt := minimalTarget(dir)
 	tgt.Mode = "0600"
 	res := Run(t.Context(), tgt, sampleBytes())
-	if res.Status != store.DeployStatusOK {
-		t.Fatalf("res=%+v", res)
-	}
+	require.Equal(t, store.DeployStatusOK, res.Status, "res=%+v", res)
 	for _, p := range []string{tgt.CertPath, tgt.KeyPath} {
 		st, err := os.Stat(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.Mode().Perm() != 0o600 {
-			t.Errorf("%s perm: got %o, want 0600", p, st.Mode().Perm())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), st.Mode().Perm(), "path=%s", p)
 	}
 }
 
@@ -76,13 +66,9 @@ func TestRun_WritesChainWhenSet(t *testing.T) {
 	chain := filepath.Join(dir, "fullchain.pem")
 	tgt.ChainPath = &chain
 	res := Run(t.Context(), tgt, sampleBytes())
-	if res.Status != store.DeployStatusOK {
-		t.Fatalf("res=%+v", res)
-	}
+	require.Equal(t, store.DeployStatusOK, res.Status, "res=%+v", res)
 	got, _ := os.ReadFile(chain)
-	if !strings.Contains(string(got), "CCC") {
-		t.Errorf("chain: %q", got)
-	}
+	assert.Contains(t, string(got), "CCC")
 }
 
 func TestRun_ChainPathSetButNoChainBytes(t *testing.T) {
@@ -94,12 +80,8 @@ func TestRun_ChainPathSetButNoChainBytes(t *testing.T) {
 	b := sampleBytes()
 	b.FullChain = nil
 	res := Run(t.Context(), tgt, b)
-	if res.Status != store.DeployStatusFailed {
-		t.Errorf("expected failed, got %v", res.Status)
-	}
-	if !strings.Contains(res.Err, "chain") {
-		t.Errorf("err: %q", res.Err)
-	}
+	assert.Equal(t, store.DeployStatusFailed, res.Status)
+	assert.Contains(t, res.Err, "chain")
 }
 
 func TestRun_RejectsRelativePath(t *testing.T) {
@@ -107,35 +89,23 @@ func TestRun_RejectsRelativePath(t *testing.T) {
 	tgt := minimalTarget(dir)
 	tgt.CertPath = "relative/cert.pem"
 	res := Run(t.Context(), tgt, sampleBytes())
-	if res.Status != store.DeployStatusFailed {
-		t.Errorf("expected failed, got %v", res.Status)
-	}
-	if !strings.Contains(res.Err, "absolute") {
-		t.Errorf("err: %q", res.Err)
-	}
+	assert.Equal(t, store.DeployStatusFailed, res.Status)
+	assert.Contains(t, res.Err, "absolute")
 }
 
 func TestRun_AtomicReplace(t *testing.T) {
 	dir := t.TempDir()
 	tgt := minimalTarget(dir)
 	// Pre-write the target with a recognisable marker.
-	if err := os.WriteFile(tgt.CertPath, []byte("OLD"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(tgt.CertPath, []byte("OLD"), 0o600))
 	res := Run(t.Context(), tgt, sampleBytes())
-	if res.Status != store.DeployStatusOK {
-		t.Fatalf("res=%+v", res)
-	}
+	require.Equal(t, store.DeployStatusOK, res.Status, "res=%+v", res)
 	got, _ := os.ReadFile(tgt.CertPath)
-	if !strings.Contains(string(got), "AAA") {
-		t.Errorf("expected new contents, got %q", got)
-	}
+	assert.Contains(t, string(got), "AAA")
 	// No leftover temp files.
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".homepki-deploy-") {
-			t.Errorf("temp file leaked: %s", e.Name())
-		}
+		assert.False(t, strings.HasPrefix(e.Name(), ".homepki-deploy-"), "temp file leaked: %s", e.Name())
 	}
 }
 
@@ -146,12 +116,9 @@ func TestRun_PostCommandSucceeds(t *testing.T) {
 	tgt.PostCommand = ptr("touch " + flag)
 
 	res := Run(t.Context(), tgt, sampleBytes())
-	if res.Status != store.DeployStatusOK {
-		t.Fatalf("res=%+v", res)
-	}
-	if _, err := os.Stat(flag); err != nil {
-		t.Errorf("post_command did not run: %v", err)
-	}
+	require.Equal(t, store.DeployStatusOK, res.Status, "res=%+v", res)
+	_, err := os.Stat(flag)
+	assert.NoError(t, err, "post_command did not run")
 }
 
 func TestRun_PostCommandFailureRecorded(t *testing.T) {
@@ -159,12 +126,8 @@ func TestRun_PostCommandFailureRecorded(t *testing.T) {
 	tgt := minimalTarget(dir)
 	tgt.PostCommand = ptr("exit 1")
 	res := Run(t.Context(), tgt, sampleBytes())
-	if res.Status != store.DeployStatusFailed {
-		t.Errorf("expected failed, got %v", res.Status)
-	}
-	if !strings.Contains(res.Err, "post_command") {
-		t.Errorf("err should mention post_command: %q", res.Err)
-	}
+	assert.Equal(t, store.DeployStatusFailed, res.Status)
+	assert.Contains(t, res.Err, "post_command")
 }
 
 func TestRun_PostCommandTimesOut(t *testing.T) {
@@ -180,9 +143,7 @@ func TestRun_PostCommandTimesOut(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 1)
 	defer cancel()
 	res := Run(ctx, tgt, sampleBytes())
-	if res.Status != store.DeployStatusFailed {
-		t.Errorf("expected failed, got %v", res.Status)
-	}
+	assert.Equal(t, store.DeployStatusFailed, res.Status)
 }
 
 func TestRun_UnknownOwnerFails(t *testing.T) {
@@ -190,9 +151,7 @@ func TestRun_UnknownOwnerFails(t *testing.T) {
 	tgt := minimalTarget(dir)
 	tgt.Owner = ptr("definitely-no-such-user")
 	res := Run(t.Context(), tgt, sampleBytes())
-	if res.Status != store.DeployStatusFailed {
-		t.Errorf("expected failed, got %v", res.Status)
-	}
+	assert.Equal(t, store.DeployStatusFailed, res.Status)
 }
 
 func TestRun_NumericOwnerNoChown(t *testing.T) {
@@ -206,16 +165,12 @@ func TestRun_NumericOwnerNoChown(t *testing.T) {
 	if uid != 0 {
 		// Non-root tests can't chown to uid 0; expect a permission failure.
 		res := Run(t.Context(), tgt, sampleBytes())
-		if res.Status != store.DeployStatusFailed {
-			t.Errorf("expected failed (non-root chown to 0), got %v", res.Status)
-		}
+		assert.Equal(t, store.DeployStatusFailed, res.Status, "expected failed (non-root chown to 0)")
 		return
 	}
 	// Running as root: should succeed.
 	res := Run(t.Context(), tgt, sampleBytes())
-	if res.Status != store.DeployStatusOK {
-		t.Errorf("expected ok as root, got %+v", res)
-	}
+	assert.Equal(t, store.DeployStatusOK, res.Status, "expected ok as root, got %+v", res)
 }
 
 func TestParseMode(t *testing.T) {
@@ -234,20 +189,16 @@ func TestParseMode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got, err := parseMode(tc.in)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("parseMode(%q) err=%v wantErr=%v", tc.in, err, tc.wantErr)
-		}
-		if !tc.wantErr && got != tc.want {
-			t.Errorf("parseMode(%q) = %o, want %o", tc.in, got, tc.want)
+		if tc.wantErr {
+			assert.Error(t, err, "parseMode(%q)", tc.in)
+		} else {
+			assert.NoError(t, err, "parseMode(%q)", tc.in)
+			assert.Equal(t, tc.want, got, "parseMode(%q)", tc.in)
 		}
 	}
 }
 
 func TestIsPermissionError(t *testing.T) {
-	if !IsPermissionError(os.ErrPermission) {
-		t.Error("os.ErrPermission should be a permission error")
-	}
-	if IsPermissionError(errors.New("nope")) {
-		t.Error("plain error should not be a permission error")
-	}
+	assert.True(t, IsPermissionError(os.ErrPermission), "os.ErrPermission should be a permission error")
+	assert.False(t, IsPermissionError(errors.New("nope")), "plain error should not be a permission error")
 }

@@ -2,56 +2,45 @@ package web
 
 import (
 	"crypto/rand"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func freshSecret(t *testing.T) []byte {
 	t.Helper()
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatal(err)
-	}
+	_, err := rand.Read(b)
+	require.NoError(t, err)
 	return b
 }
 
 func TestSessionRoundTrip(t *testing.T) {
 	secret := freshSecret(t)
 	value, err := SignSession(secret)
-	if err != nil {
-		t.Fatalf("SignSession: %v", err)
-	}
-	if err := VerifySession(secret, value); err != nil {
-		t.Errorf("VerifySession: %v", err)
-	}
+	require.NoError(t, err, "SignSession")
+	assert.NoError(t, VerifySession(secret, value), "VerifySession")
 }
 
 func TestVerifySession_RejectsWrongSecret(t *testing.T) {
 	value, err := SignSession(freshSecret(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	other := freshSecret(t)
-	if err := VerifySession(other, value); !errors.Is(err, ErrSessionInvalid) {
-		t.Errorf("got %v, want ErrSessionInvalid", err)
-	}
+	assert.ErrorIs(t, VerifySession(other, value), ErrSessionInvalid)
 }
 
 func TestVerifySession_RejectsTamperedPayload(t *testing.T) {
 	secret := freshSecret(t)
 	value, err := SignSession(secret)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	// Flip a character in the middle of the base64 blob.
 	bytes := []byte(value)
 	bytes[len(bytes)/2] ^= 0x01
-	if err := VerifySession(secret, string(bytes)); !errors.Is(err, ErrSessionInvalid) {
-		t.Errorf("got %v, want ErrSessionInvalid", err)
-	}
+	assert.ErrorIs(t, VerifySession(secret, string(bytes)), ErrSessionInvalid)
 }
 
 func TestVerifySession_RejectsExpired(t *testing.T) {
@@ -62,12 +51,8 @@ func TestVerifySession_RejectsExpired(t *testing.T) {
 		ExpiresAt: now.Add(-time.Minute).Unix(),
 		Version:   sessionVersion,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := VerifySession(secret, value); !errors.Is(err, ErrSessionInvalid) {
-		t.Errorf("got %v, want ErrSessionInvalid", err)
-	}
+	require.NoError(t, err)
+	assert.ErrorIs(t, VerifySession(secret, value), ErrSessionInvalid)
 }
 
 func TestVerifySession_RejectsBadVersion(t *testing.T) {
@@ -78,12 +63,8 @@ func TestVerifySession_RejectsBadVersion(t *testing.T) {
 		ExpiresAt: now.Add(time.Hour).Unix(),
 		Version:   sessionVersion + 99,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := VerifySession(secret, value); !errors.Is(err, ErrSessionInvalid) {
-		t.Errorf("got %v, want ErrSessionInvalid", err)
-	}
+	require.NoError(t, err)
+	assert.ErrorIs(t, VerifySession(secret, value), ErrSessionInvalid)
 }
 
 func TestVerifySession_RejectsGarbage(t *testing.T) {
@@ -95,54 +76,30 @@ func TestVerifySession_RejectsGarbage(t *testing.T) {
 	}
 	for _, v := range cases {
 		t.Run(v, func(t *testing.T) {
-			if err := VerifySession(freshSecret(t), v); !errors.Is(err, ErrSessionInvalid) {
-				t.Errorf("got %v, want ErrSessionInvalid", err)
-			}
+			assert.ErrorIs(t, VerifySession(freshSecret(t), v), ErrSessionInvalid)
 		})
 	}
 }
 
 func TestNewSessionCookie_Attributes(t *testing.T) {
 	c := NewSessionCookie("opaque-value", true)
-	if c.Name != SessionCookieName {
-		t.Errorf("name: got %q, want %q", c.Name, SessionCookieName)
-	}
-	if c.Value != "opaque-value" {
-		t.Errorf("value: got %q", c.Value)
-	}
-	if c.Path != "/" {
-		t.Errorf("path: got %q", c.Path)
-	}
-	if !c.HttpOnly {
-		t.Error("HttpOnly should be true")
-	}
-	if c.SameSite != http.SameSiteLaxMode {
-		t.Errorf("SameSite: got %d, want Lax", c.SameSite)
-	}
-	if !c.Secure {
-		t.Error("Secure should be true when secure=true")
-	}
-	if c.MaxAge != int(SessionTTL.Seconds()) {
-		t.Errorf("MaxAge: got %d, want %d", c.MaxAge, int(SessionTTL.Seconds()))
-	}
+	assert.Equal(t, SessionCookieName, c.Name, "name")
+	assert.Equal(t, "opaque-value", c.Value, "value")
+	assert.Equal(t, "/", c.Path, "path")
+	assert.True(t, c.HttpOnly, "HttpOnly should be true")
+	assert.Equal(t, http.SameSiteLaxMode, c.SameSite, "SameSite")
+	assert.True(t, c.Secure, "Secure should be true when secure=true")
+	assert.Equal(t, int(SessionTTL.Seconds()), c.MaxAge, "MaxAge")
 }
 
 func TestNewSessionCookie_InsecureMode(t *testing.T) {
 	c := NewSessionCookie("v", false)
-	if c.Secure {
-		t.Error("Secure should be false when secure=false")
-	}
+	assert.False(t, c.Secure, "Secure should be false when secure=false")
 }
 
 func TestClearSessionCookie(t *testing.T) {
 	c := ClearSessionCookie()
-	if c.Name != SessionCookieName {
-		t.Errorf("name: got %q", c.Name)
-	}
-	if c.Value != "" {
-		t.Errorf("value: got %q, want empty", c.Value)
-	}
-	if c.MaxAge != -1 {
-		t.Errorf("MaxAge: got %d, want -1", c.MaxAge)
-	}
+	assert.Equal(t, SessionCookieName, c.Name, "name")
+	assert.Equal(t, "", c.Value, "value")
+	assert.Equal(t, -1, c.MaxAge, "MaxAge")
 }

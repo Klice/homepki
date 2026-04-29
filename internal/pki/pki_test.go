@@ -6,9 +6,11 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"net"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fastSpec is the key spec used throughout the tests — ECDSA P-256
@@ -29,22 +31,14 @@ func TestGenerateKey_AllAlgos(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			k, err := GenerateKey(tc.spec)
-			if err != nil {
-				t.Fatalf("GenerateKey: %v", err)
-			}
+			require.NoError(t, err, "GenerateKey")
 			switch k.(type) {
 			case *rsa.PrivateKey:
-				if tc.want != "*rsa.PrivateKey" {
-					t.Errorf("got *rsa.PrivateKey, want %s", tc.want)
-				}
+				assert.Equal(t, "*rsa.PrivateKey", tc.want)
 			case *ecdsa.PrivateKey:
-				if tc.want != "*ecdsa.PrivateKey" {
-					t.Errorf("got *ecdsa.PrivateKey, want %s", tc.want)
-				}
+				assert.Equal(t, "*ecdsa.PrivateKey", tc.want)
 			case ed25519.PrivateKey:
-				if tc.want != "ed25519.PrivateKey" {
-					t.Errorf("got ed25519.PrivateKey, want %s", tc.want)
-				}
+				assert.Equal(t, "ed25519.PrivateKey", tc.want)
 			default:
 				t.Errorf("unexpected key type %T", k)
 			}
@@ -66,32 +60,21 @@ func TestGenerateKey_RejectsBadParams(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := GenerateKey(tc.spec)
-			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
-				t.Errorf("got %v, want error containing %q", err, tc.wantSub)
-			}
+			assert.ErrorContains(t, err, tc.wantSub)
 		})
 	}
 }
 
 func TestNewSerial_NonNegativeAndDistinct(t *testing.T) {
 	a, err := NewSerial()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	b, err := NewSerial()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.Sign() < 0 || b.Sign() < 0 {
-		t.Error("serials must be non-negative")
-	}
-	if a.Cmp(b) == 0 {
-		t.Error("two serials should be different")
-	}
+	require.NoError(t, err)
+	assert.False(t, a.Sign() < 0 || b.Sign() < 0, "serials must be non-negative")
+	assert.NotEqual(t, 0, a.Cmp(b), "two serials should be different")
 	// 159-bit upper bound: BitLen is at most 159.
-	if a.BitLen() > 159 || b.BitLen() > 159 {
-		t.Errorf("serial too long: %d, %d bits", a.BitLen(), b.BitLen())
-	}
+	assert.LessOrEqual(t, a.BitLen(), 159, "serial too long")
+	assert.LessOrEqual(t, b.BitLen(), 159, "serial too long")
 }
 
 func TestIssueRoot_Basic(t *testing.T) {
@@ -100,29 +83,15 @@ func TestIssueRoot_Basic(t *testing.T) {
 		Key:      fastSpec,
 		Validity: 10 * 365 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("IssueRoot: %v", err)
-	}
-	if !root.Cert.IsCA || !root.Cert.BasicConstraintsValid {
-		t.Error("root must have IsCA + BasicConstraintsValid")
-	}
-	if root.Cert.Subject.CommonName != "Test Root" {
-		t.Errorf("CN: got %q", root.Cert.Subject.CommonName)
-	}
-	if len(root.Cert.CRLDistributionPoints) != 0 {
-		t.Errorf("root must not have CRL DP, got %v", root.Cert.CRLDistributionPoints)
-	}
-	if root.Cert.KeyUsage&x509.KeyUsageCertSign == 0 {
-		t.Error("root must have KeyUsageCertSign")
-	}
-	if root.Cert.KeyUsage&x509.KeyUsageCRLSign == 0 {
-		t.Error("root must have KeyUsageCRLSign")
-	}
+	require.NoError(t, err, "IssueRoot")
+	assert.True(t, root.Cert.IsCA && root.Cert.BasicConstraintsValid, "root must have IsCA + BasicConstraintsValid")
+	assert.Equal(t, "Test Root", root.Cert.Subject.CommonName)
+	assert.Empty(t, root.Cert.CRLDistributionPoints, "root must not have CRL DP")
+	assert.NotZero(t, root.Cert.KeyUsage&x509.KeyUsageCertSign, "root must have KeyUsageCertSign")
+	assert.NotZero(t, root.Cert.KeyUsage&x509.KeyUsageCRLSign, "root must have KeyUsageCRLSign")
 
 	// Self-signed: parent fields equal subject.
-	if root.Cert.Issuer.String() != root.Cert.Subject.String() {
-		t.Errorf("self-signed: issuer %q != subject %q", root.Cert.Issuer, root.Cert.Subject)
-	}
+	assert.Equal(t, root.Cert.Subject.String(), root.Cert.Issuer.String(), "self-signed: issuer must equal subject")
 }
 
 func TestIssueRoot_RejectsBadInput(t *testing.T) {
@@ -136,9 +105,8 @@ func TestIssueRoot_RejectsBadInput(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := IssueRoot(tc.req); err == nil {
-				t.Error("expected error, got nil")
-			}
+			_, err := IssueRoot(tc.req)
+			assert.Error(t, err)
 		})
 	}
 }
@@ -155,19 +123,11 @@ func TestIssueIntermediate_BakesCRLDP(t *testing.T) {
 		CRLBaseURL: "https://certs.lan",
 		Validity:   5 * 365 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("IssueIntermediate: %v", err)
-	}
-	if !inter.Cert.IsCA {
-		t.Error("intermediate must be CA")
-	}
+	require.NoError(t, err, "IssueIntermediate")
+	assert.True(t, inter.Cert.IsCA, "intermediate must be CA")
 	wantCRL := "https://certs.lan/crl/" + parentID + ".crl"
-	if got := inter.Cert.CRLDistributionPoints; len(got) != 1 || got[0] != wantCRL {
-		t.Errorf("CRL DP: got %v, want [%s]", got, wantCRL)
-	}
-	if inter.Cert.Issuer.CommonName != root.Cert.Subject.CommonName {
-		t.Errorf("issuer: got %q, want %q", inter.Cert.Issuer.CommonName, root.Cert.Subject.CommonName)
-	}
+	assert.Equal(t, []string{wantCRL}, inter.Cert.CRLDistributionPoints)
+	assert.Equal(t, root.Cert.Subject.CommonName, inter.Cert.Issuer.CommonName)
 }
 
 func TestIssueIntermediate_PathLen(t *testing.T) {
@@ -182,12 +142,9 @@ func TestIssueIntermediate_PathLen(t *testing.T) {
 		PathLen:    &zero,
 		Validity:   time.Hour,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !inter.Cert.MaxPathLenZero || inter.Cert.MaxPathLen != 0 {
-		t.Errorf("path len: got MaxPathLen=%d MaxPathLenZero=%v", inter.Cert.MaxPathLen, inter.Cert.MaxPathLenZero)
-	}
+	require.NoError(t, err)
+	assert.True(t, inter.Cert.MaxPathLenZero, "MaxPathLenZero")
+	assert.Equal(t, 0, inter.Cert.MaxPathLen)
 }
 
 func TestIssueLeaf_BasicAndChainVerify(t *testing.T) {
@@ -201,9 +158,7 @@ func TestIssueLeaf_BasicAndChainVerify(t *testing.T) {
 		CRLBaseURL: "https://certs.lan",
 		Validity:   2 * 365 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	leaf, err := IssueLeaf(LeafRequest{
 		Subject:    Subject{CN: "leaf.test"},
 		Key:        fastSpec,
@@ -214,45 +169,34 @@ func TestIssueLeaf_BasicAndChainVerify(t *testing.T) {
 		SANIPs:     []net.IP{net.ParseIP("10.0.0.1")},
 		Validity:   90 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Sanity checks on leaf shape.
-	if leaf.Cert.IsCA {
-		t.Error("leaf must not be CA")
-	}
-	if !sliceContains(leaf.Cert.ExtKeyUsage, x509.ExtKeyUsageServerAuth) {
-		t.Errorf("leaf ext key usage: got %v, want ServerAuth", leaf.Cert.ExtKeyUsage)
-	}
-	if got := leaf.Cert.DNSNames; len(got) != 2 || got[0] != "leaf.test" {
-		t.Errorf("DNS SANs: got %v", got)
-	}
-	if len(leaf.Cert.IPAddresses) != 1 || !leaf.Cert.IPAddresses[0].Equal(net.ParseIP("10.0.0.1")) {
-		t.Errorf("IP SANs: got %v", leaf.Cert.IPAddresses)
-	}
+	assert.False(t, leaf.Cert.IsCA, "leaf must not be CA")
+	assert.True(t, sliceContains(leaf.Cert.ExtKeyUsage, x509.ExtKeyUsageServerAuth), "leaf ext key usage: got %v, want ServerAuth", leaf.Cert.ExtKeyUsage)
+	assert.Equal(t, []string{"leaf.test", "alt.leaf.test"}, leaf.Cert.DNSNames)
+	require.Len(t, leaf.Cert.IPAddresses, 1)
+	assert.True(t, leaf.Cert.IPAddresses[0].Equal(net.ParseIP("10.0.0.1")), "IP SANs: got %v", leaf.Cert.IPAddresses)
 
 	// Build the trust pool and verify the leaf via x509.
 	roots := x509.NewCertPool()
 	roots.AddCert(root.Cert)
 	intermediates := x509.NewCertPool()
 	intermediates.AddCert(inter.Cert)
-	if _, err := leaf.Cert.Verify(x509.VerifyOptions{
+	_, err = leaf.Cert.Verify(x509.VerifyOptions{
 		Roots:         roots,
 		Intermediates: intermediates,
 		DNSName:       "leaf.test",
-	}); err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
+	})
+	require.NoError(t, err, "Verify")
 
 	// And reject a name that's not in the SANs.
-	if _, err := leaf.Cert.Verify(x509.VerifyOptions{
+	_, err = leaf.Cert.Verify(x509.VerifyOptions{
 		Roots:         roots,
 		Intermediates: intermediates,
 		DNSName:       "not-in-sans.test",
-	}); err == nil {
-		t.Error("Verify should reject unknown DNS name")
-	}
+	})
+	assert.Error(t, err, "Verify should reject unknown DNS name")
 }
 
 func TestIssueLeaf_RejectsMissingSAN(t *testing.T) {
@@ -265,18 +209,14 @@ func TestIssueLeaf_RejectsMissingSAN(t *testing.T) {
 		CRLBaseURL: "https://x.test",
 		Validity:   time.Hour,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	_, err = IssueLeaf(LeafRequest{
 		Subject:  Subject{CN: "leaf"},
 		Key:      fastSpec,
 		Parent:   &Signer{Cert: inter.Cert, Key: inter.Key},
 		Validity: time.Hour,
 	})
-	if err == nil || !strings.Contains(err.Error(), "SAN") {
-		t.Errorf("got %v, want SAN error", err)
-	}
+	assert.ErrorContains(t, err, "SAN")
 }
 
 func TestCRLURL(t *testing.T) {
@@ -289,9 +229,7 @@ func TestCRLURL(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got := crlURL(tc.base, tc.id)
-		if got != tc.want {
-			t.Errorf("crlURL(%q, %q) = %q, want %q", tc.base, tc.id, got, tc.want)
-		}
+		assert.Equal(t, tc.want, got, "crlURL(%q, %q)", tc.base, tc.id)
 	}
 }
 
@@ -304,9 +242,7 @@ func mustRoot(t *testing.T) *Issued {
 		Key:      fastSpec,
 		Validity: 10 * 365 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("IssueRoot: %v", err)
-	}
+	require.NoError(t, err, "IssueRoot")
 	return root
 }
 

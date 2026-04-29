@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/Klice/homepki/internal/store"
 )
 
@@ -42,18 +45,13 @@ func createTarget(t *testing.T, c *clientLite, srv *Server, leafID string, overr
 		form[k] = v
 	}
 	w := c.get("/certs/" + leafID + "/deploy/new")
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET deploy/new: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code, "GET deploy/new")
 	form.Set("form_token", extractFormToken(t, w.Body.String()))
 	w = c.postForm("/certs/"+leafID+"/deploy/new", form)
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("POST deploy/new: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "POST deploy/new")
 	targets, err := store.ListDeployTargets(srv.db, leafID)
-	if err != nil || len(targets) == 0 {
-		t.Fatalf("no targets after create: err=%v len=%d", err, len(targets))
-	}
+	require.NoError(t, err, "ListDeployTargets")
+	require.NotEmpty(t, targets, "no targets after create")
 	return targets[len(targets)-1].ID
 }
 
@@ -78,9 +76,7 @@ func TestDeploy_CreateAndAppearOnDetail(t *testing.T) {
 		`/certs/` + leafID + `/deploy/` + tid + `/edit`,
 		`/certs/` + leafID + `/deploy/` + tid + `/delete`,
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("detail page missing %q", want)
-		}
+		assert.Contains(t, body, want)
 	}
 }
 
@@ -97,12 +93,8 @@ func TestDeploy_CreateRejectsRelativePath(t *testing.T) {
 		"mode":       {"0640"},
 		"form_token": {formTok},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "absolute") {
-		t.Errorf("expected 'absolute' in error body")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "absolute")
 }
 
 func TestDeploy_CreateRejectsBadMode(t *testing.T) {
@@ -117,9 +109,7 @@ func TestDeploy_CreateRejectsBadMode(t *testing.T) {
 		"mode":       {"not-octal"},
 		"form_token": {formTok},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestDeploy_CreateOnNonLeafIs404(t *testing.T) {
@@ -130,9 +120,7 @@ func TestDeploy_CreateOnNonLeafIs404(t *testing.T) {
 	rootID, _, _ := issueChain(t, c)
 
 	w := c.get("/certs/" + rootID + "/deploy/new")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestDeploy_CreateFormTokenReplay(t *testing.T) {
@@ -150,20 +138,15 @@ func TestDeploy_CreateFormTokenReplay(t *testing.T) {
 		"form_token": {formTok},
 	}
 	w = c.postForm("/certs/"+leafID+"/deploy/new", form)
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("first: %d", w.Code)
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "first")
 	first := w.Header().Get("Location")
 
 	// Replay same form_token → 303 to the originally-set result_url, no second row.
 	w = c.postForm("/certs/"+leafID+"/deploy/new", form)
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != first {
-		t.Errorf("replay: got %d %q, want 303 %q", w.Code, w.Header().Get("Location"), first)
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code, "replay status")
+	assert.Equal(t, first, w.Header().Get("Location"), "replay location")
 	targets, _ := store.ListDeployTargets(srv.db, leafID)
-	if len(targets) != 1 {
-		t.Errorf("targets after replay: got %d, want 1", len(targets))
-	}
+	assert.Len(t, targets, 1, "targets after replay")
 }
 
 // ============== edit ==============
@@ -176,9 +159,7 @@ func TestDeploy_EditUpdatesRow(t *testing.T) {
 	})
 
 	w := c.get("/certs/" + leafID + "/deploy/" + tid + "/edit")
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET edit: %d", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code, "GET edit")
 	formTok := extractFormToken(t, w.Body.String())
 	newCert := filepath.Join(dir, "new.crt")
 	w = c.postForm("/certs/"+leafID+"/deploy/"+tid+"/edit", url.Values{
@@ -189,16 +170,13 @@ func TestDeploy_EditUpdatesRow(t *testing.T) {
 		"auto_on_rotate": {"1"},
 		"form_token":     {formTok},
 	})
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("POST edit: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "POST edit")
 	got, err := store.GetDeployTarget(srv.db, tid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Name != "haproxy" || got.CertPath != newCert || !got.AutoOnRotate || got.Mode != "0600" {
-		t.Errorf("update did not stick: %+v", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "haproxy", got.Name)
+	assert.Equal(t, newCert, got.CertPath)
+	assert.True(t, got.AutoOnRotate)
+	assert.Equal(t, "0600", got.Mode)
 }
 
 func TestDeploy_EditCrossCertIs404(t *testing.T) {
@@ -206,9 +184,7 @@ func TestDeploy_EditCrossCertIs404(t *testing.T) {
 	tid := createTarget(t, c, srv, leafID, nil)
 	// Try editing under a different (non-existent) cert id.
 	w := c.get("/certs/no-such/deploy/" + tid + "/edit")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // ============== delete ==============
@@ -218,17 +194,12 @@ func TestDeploy_DeleteRemovesAndIsIdempotent(t *testing.T) {
 	tid := createTarget(t, c, srv, leafID, nil)
 
 	w := c.postForm("/certs/"+leafID+"/deploy/"+tid+"/delete", url.Values{})
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("first delete: %d body=%q", w.Code, w.Body.String())
-	}
-	if _, err := store.GetDeployTarget(srv.db, tid); err == nil {
-		t.Error("target still exists after delete")
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "first delete")
+	_, err := store.GetDeployTarget(srv.db, tid)
+	assert.Error(t, err, "target still exists after delete")
 	// Replay → 303, no error.
 	w = c.postForm("/certs/"+leafID+"/deploy/"+tid+"/delete", url.Values{})
-	if w.Code != http.StatusSeeOther {
-		t.Errorf("replay: got %d, want 303", w.Code)
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code, "replay")
 }
 
 // ============== run ==============
@@ -248,52 +219,34 @@ func TestDeploy_RunOneWritesFiles(t *testing.T) {
 	})
 
 	w := c.postForm("/certs/"+leafID+"/deploy/"+tid+"/run", url.Values{})
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("run: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "run")
 
 	// Cert file: parses as a real X.509 with our CN.
 	certPEM, err := os.ReadFile(certPath)
-	if err != nil {
-		t.Fatalf("cert file: %v", err)
-	}
+	require.NoError(t, err, "cert file")
 	block, _ := pem.Decode(certPEM)
-	if block == nil {
-		t.Fatalf("cert PEM did not decode: %q", certPEM)
-	}
+	require.NotNil(t, block, "cert PEM did not decode")
 	parsed, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		t.Fatalf("parse cert: %v", err)
-	}
-	if parsed.Subject.CommonName != "revoke.leaf.test" {
-		t.Errorf("cert CN: %q", parsed.Subject.CommonName)
-	}
+	require.NoError(t, err, "parse cert")
+	assert.Equal(t, "revoke.leaf.test", parsed.Subject.CommonName, "cert CN")
 	// Key file: PKCS#8 PEM.
 	keyPEM, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Fatalf("key file: %v", err)
-	}
+	require.NoError(t, err, "key file")
 	keyBlock, _ := pem.Decode(keyPEM)
-	if keyBlock == nil || keyBlock.Type != "PRIVATE KEY" {
-		t.Errorf("key block: %+v", keyBlock)
-	}
-	if _, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes); err != nil {
-		t.Errorf("parse pkcs8: %v", err)
-	}
+	require.NotNil(t, keyBlock, "key block")
+	assert.Equal(t, "PRIVATE KEY", keyBlock.Type, "key block type")
+	_, err = x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
+	assert.NoError(t, err, "parse pkcs8")
 	// Fullchain: leaf + intermediate.
 	chain, _ := os.ReadFile(chainPath)
-	if strings.Count(string(chain), "-----BEGIN CERTIFICATE-----") != 2 {
-		t.Errorf("fullchain block count: %q", chain)
-	}
+	assert.Equal(t, 2, strings.Count(string(chain), "-----BEGIN CERTIFICATE-----"), "fullchain block count")
 	// post_command ran.
-	if _, err := os.Stat(flag); err != nil {
-		t.Errorf("post_command did not run: %v", err)
-	}
+	_, err = os.Stat(flag)
+	assert.NoError(t, err, "post_command did not run")
 	// Row updated.
 	got, _ := store.GetDeployTarget(srv.db, tid)
-	if got.LastStatus == nil || *got.LastStatus != "ok" {
-		t.Errorf("last_status: got %v", got.LastStatus)
-	}
+	require.NotNil(t, got.LastStatus, "last_status nil")
+	assert.Equal(t, "ok", *got.LastStatus, "last_status")
 }
 
 func TestDeploy_RunOneRecordsFailure(t *testing.T) {
@@ -304,16 +257,12 @@ func TestDeploy_RunOneRecordsFailure(t *testing.T) {
 		"post_command": {"exit 1"},
 	})
 	w := c.postForm("/certs/"+leafID+"/deploy/"+tid+"/run", url.Values{})
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("run: %d", w.Code)
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "run")
 	got, _ := store.GetDeployTarget(srv.db, tid)
-	if got.LastStatus == nil || *got.LastStatus != "failed" {
-		t.Errorf("last_status: got %v", got.LastStatus)
-	}
-	if got.LastError == nil || !strings.Contains(*got.LastError, "post_command") {
-		t.Errorf("last_error: %v", got.LastError)
-	}
+	require.NotNil(t, got.LastStatus, "last_status nil")
+	assert.Equal(t, "failed", *got.LastStatus, "last_status")
+	require.NotNil(t, got.LastError, "last_error nil")
+	assert.Contains(t, *got.LastError, "post_command", "last_error")
 }
 
 func TestDeploy_RunAllSequential(t *testing.T) {
@@ -330,19 +279,15 @@ func TestDeploy_RunAllSequential(t *testing.T) {
 	})
 
 	w := c.postForm("/certs/"+leafID+"/deploy", url.Values{})
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("run-all: %d", w.Code)
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "run-all")
 	for _, id := range []string{a, b} {
 		got, _ := store.GetDeployTarget(srv.db, id)
-		if got.LastStatus == nil || *got.LastStatus != "ok" {
-			t.Errorf("target %s status: %v", id, got.LastStatus)
-		}
+		require.NotNil(t, got.LastStatus, "target %s status nil", id)
+		assert.Equal(t, "ok", *got.LastStatus, "target %s status", id)
 	}
 	for _, p := range []string{filepath.Join(dir, "a.crt"), filepath.Join(dir, "b.crt")} {
-		if _, err := os.Stat(p); err != nil {
-			t.Errorf("file %s not written: %v", p, err)
-		}
+		_, err := os.Stat(p)
+		assert.NoError(t, err, "file %s not written", p)
 	}
 }
 
@@ -352,9 +297,8 @@ func TestDeploy_RunWhenLockedRedirectsToUnlock(t *testing.T) {
 	srv.keystore.Lock()
 
 	w := c.postForm("/certs/"+leafID+"/deploy/"+tid+"/run", url.Values{})
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got %d %q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 // ============== auto on rotate ==============
@@ -385,20 +329,14 @@ func TestDeploy_AutoOnRotateFiresAfterRotation(t *testing.T) {
 		"validity_days":   {"90"},
 	})
 
-	if newID == leafID {
-		t.Fatal("rotated cert has same id")
-	}
+	require.NotEqual(t, leafID, newID, "rotated cert has same id")
 	// Old target's last_status should still be unset — rotation does not
 	// touch the old target's row.
 	got, _ := store.GetDeployTarget(srv.db, tid)
-	if got.LastStatus != nil {
-		t.Errorf("old target should not have been re-run: %v", got.LastStatus)
-	}
+	assert.Nil(t, got.LastStatus, "old target should not have been re-run")
 	// The new cert has no deploy targets at all.
 	newTargets, _ := store.ListDeployTargets(srv.db, newID)
-	if len(newTargets) != 0 {
-		t.Errorf("new cert targets: got %d, want 0", len(newTargets))
-	}
+	assert.Empty(t, newTargets, "new cert targets")
 }
 
 func TestDeploy_AutoOnRotateRunsWhenTargetIsOnNewCert(t *testing.T) {
@@ -418,12 +356,10 @@ func TestDeploy_AutoOnRotateRunsWhenTargetIsOnNewCert(t *testing.T) {
 	srv.runAutoOnRotateTargets(httpRequestForCtx(), cert)
 
 	got, _ := store.GetDeployTarget(srv.db, tid)
-	if got.LastStatus == nil || *got.LastStatus != "ok" {
-		t.Errorf("auto-on-rotate did not run target: %v", got.LastStatus)
-	}
-	if _, err := os.Stat(certPath); err != nil {
-		t.Errorf("cert not written: %v", err)
-	}
+	require.NotNil(t, got.LastStatus, "auto-on-rotate did not run target")
+	assert.Equal(t, "ok", *got.LastStatus, "auto-on-rotate target status")
+	_, err := os.Stat(certPath)
+	assert.NoError(t, err, "cert not written")
 }
 
 // httpRequestForCtx synthesises a request just so handlers that grab

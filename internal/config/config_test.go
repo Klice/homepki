@@ -1,8 +1,10 @@
 package config
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // allKeys is every env var FromEnv reads. Listed here so each test case
@@ -124,20 +126,12 @@ func TestFromEnv(t *testing.T) {
 			got, err := FromEnv()
 
 			if tc.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error containing %q, got nil; result was %+v", tc.wantErr, got)
-				}
-				if !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("expected error containing %q, got %q", tc.wantErr, err.Error())
-				}
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tc.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tc.want {
-				t.Errorf("got %+v, want %+v", got, tc.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

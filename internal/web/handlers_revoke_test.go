@@ -5,10 +5,11 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/Klice/homepki/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // issueChain runs the GET-then-POST cycle for root → intermediate → leaf
@@ -50,18 +51,12 @@ func TestRevoke_LeafUpdatesIssuerCRL(t *testing.T) {
 
 	// Initial CRL on intermediate is empty (the issuance flow created it).
 	cached, err := store.GetLatestCRL(db, interID)
-	if err != nil {
-		t.Fatalf("GetLatestCRL initial: %v", err)
-	}
-	if cached.CRLNumber != 1 {
-		t.Errorf("initial CRL number: got %d, want 1", cached.CRLNumber)
-	}
+	require.NoError(t, err, "GetLatestCRL initial")
+	assert.Equal(t, int64(1), cached.CRLNumber, "initial CRL number")
 
 	// Look up the leaf's serial so we can assert it appears on the new CRL.
 	leafCert, err := store.GetCert(db, leafID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	wantSerial, _ := new(big.Int).SetString(leafCert.SerialNumber, 16)
 
 	// Visit the detail page first so the CSRF token is in the client jar.
@@ -69,54 +64,30 @@ func TestRevoke_LeafUpdatesIssuerCRL(t *testing.T) {
 
 	// Revoke with reason 1 (keyCompromise).
 	w := c.postForm("/certs/"+leafID+"/revoke", url.Values{"reason": {"1"}})
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/certs/"+leafID {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/certs/"+leafID, w.Header().Get("Location"))
 
 	// Cert is now revoked.
 	got, err := store.GetCert(db, leafID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != "revoked" {
-		t.Errorf("status: got %q, want revoked", got.Status)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "revoked", got.Status)
 
 	// Intermediate's CRL has bumped to number 2 and lists the leaf serial.
 	regen, err := store.GetLatestCRL(db, interID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if regen.CRLNumber != 2 {
-		t.Errorf("CRL number after revoke: got %d, want 2", regen.CRLNumber)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), regen.CRLNumber, "CRL number after revoke")
 	parsedCRL, err := x509.ParseRevocationList(regen.DER)
-	if err != nil {
-		t.Fatalf("ParseRevocationList: %v", err)
-	}
-	if len(parsedCRL.RevokedCertificateEntries) != 1 {
-		t.Fatalf("entries: got %d, want 1", len(parsedCRL.RevokedCertificateEntries))
-	}
-	if parsedCRL.RevokedCertificateEntries[0].SerialNumber.Cmp(wantSerial) != 0 {
-		t.Errorf("revoked serial: got %s, want %s",
-			parsedCRL.RevokedCertificateEntries[0].SerialNumber, wantSerial)
-	}
-	if parsedCRL.RevokedCertificateEntries[0].ReasonCode != 1 {
-		t.Errorf("reason code: got %d, want 1", parsedCRL.RevokedCertificateEntries[0].ReasonCode)
-	}
+	require.NoError(t, err, "ParseRevocationList")
+	require.Len(t, parsedCRL.RevokedCertificateEntries, 1, "entries")
+	assert.Equal(t, 0, parsedCRL.RevokedCertificateEntries[0].SerialNumber.Cmp(wantSerial), "revoked serial")
+	assert.Equal(t, 1, parsedCRL.RevokedCertificateEntries[0].ReasonCode, "reason code")
 
 	// And the CRL signature verifies under the intermediate.
 	interStoreCert, err := store.GetCert(db, interID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	interParsed, err := x509.ParseCertificate(interStoreCert.DERCert)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := parsedCRL.CheckSignatureFrom(interParsed); err != nil {
-		t.Errorf("CRL signature does not verify under intermediate: %v", err)
-	}
+	require.NoError(t, err)
+	assert.NoError(t, parsedCRL.CheckSignatureFrom(interParsed), "CRL signature does not verify under intermediate")
 }
 
 func TestRevoke_IdempotentReplay(t *testing.T) {
@@ -130,21 +101,15 @@ func TestRevoke_IdempotentReplay(t *testing.T) {
 
 	// First revoke: regular 303.
 	w := c.postForm("/certs/"+leafID+"/revoke", url.Values{"reason": {"1"}})
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("first revoke: %d", w.Code)
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "first revoke")
 	crlAfter1, _ := store.GetLatestCRL(db, interID)
 
 	// Second revoke on same cert: should still 303 (no error), CRL number
 	// should NOT bump (we no-op when the cert is already revoked).
 	w = c.postForm("/certs/"+leafID+"/revoke", url.Values{"reason": {"1"}})
-	if w.Code != http.StatusSeeOther {
-		t.Errorf("replay: got %d, want 303", w.Code)
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code, "replay")
 	crlAfter2, _ := store.GetLatestCRL(db, interID)
-	if crlAfter2.CRLNumber != crlAfter1.CRLNumber {
-		t.Errorf("CRL bumped on replay: %d -> %d", crlAfter1.CRLNumber, crlAfter2.CRLNumber)
-	}
+	assert.Equal(t, crlAfter1.CRLNumber, crlAfter2.CRLNumber, "CRL bumped on replay")
 }
 
 func TestRevoke_RejectsBadReason(t *testing.T) {
@@ -157,14 +122,10 @@ func TestRevoke_RejectsBadReason(t *testing.T) {
 
 	// Reason code 6 (certificateHold) is excluded per LIFECYCLE.md §5.2.
 	w := c.postForm("/certs/"+leafID+"/revoke", url.Values{"reason": {"6"}})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 	// And empty reason fails too.
 	w = c.postForm("/certs/"+leafID+"/revoke", url.Values{"reason": {""}})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("empty reason: got %d, want 400", w.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code, "empty reason")
 }
 
 func TestRevoke_RejectsCAReasonOnLeaf(t *testing.T) {
@@ -177,9 +138,7 @@ func TestRevoke_RejectsCAReasonOnLeaf(t *testing.T) {
 
 	// cACompromise (2) is CA-only.
 	w := c.postForm("/certs/"+leafID+"/revoke", url.Values{"reason": {"2"}})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestRevoke_NotFound(t *testing.T) {
@@ -190,9 +149,7 @@ func TestRevoke_NotFound(t *testing.T) {
 	c.get("/") // prime CSRF
 
 	w := c.postForm("/certs/no-such-id/revoke", url.Values{"reason": {"1"}})
-	if w.Code != http.StatusNotFound {
-		t.Errorf("got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestRevoke_RedirectsWhenLocked(t *testing.T) {
@@ -206,9 +163,8 @@ func TestRevoke_RedirectsWhenLocked(t *testing.T) {
 	srv.keystore.Lock()
 
 	w := c.postForm("/certs/"+leafID+"/revoke", url.Values{"reason": {"1"}})
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 func TestDetailHidesRevokeOnAlreadyRevoked(t *testing.T) {
@@ -222,11 +178,7 @@ func TestDetailHidesRevokeOnAlreadyRevoked(t *testing.T) {
 
 	// Detail page should no longer offer to revoke.
 	w := c.get("/certs/" + leafID)
-	if strings.Contains(w.Body.String(), "Revoke this certificate") {
-		t.Error("revoke form still shown on already-revoked cert")
-	}
-	if !strings.Contains(w.Body.String(), "revoked") {
-		t.Errorf("status not displayed as revoked")
-	}
+	assert.NotContains(t, w.Body.String(), "Revoke this certificate", "revoke form still shown on already-revoked cert")
+	assert.Contains(t, w.Body.String(), "revoked", "status not displayed as revoked")
 	_ = db
 }

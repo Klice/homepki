@@ -1,100 +1,59 @@
 package store
 
 import (
-	"bytes"
-	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSettings_GetMissingReturnsSentinel(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	_, err := GetSetting(db, "no-such-key")
-	if !errors.Is(err, ErrSettingNotFound) {
-		t.Errorf("got %v, want ErrSettingNotFound", err)
-	}
+	assert.ErrorIs(t, err, ErrSettingNotFound)
 }
 
 func TestSettings_SetThenGetRoundTrip(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	want := []byte("hello world")
-	if err := SetSetting(db, "greeting", want); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
+	require.NoError(t, SetSetting(db, "greeting", want), "SetSetting")
 	got, err := GetSetting(db, "greeting")
-	if err != nil {
-		t.Fatalf("GetSetting: %v", err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Errorf("got %q, want %q", got, want)
-	}
+	require.NoError(t, err, "GetSetting")
+	assert.Equal(t, want, got)
 }
 
 func TestSettings_SetIsUpsert(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetSetting(db, "k", []byte("first")); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetSetting(db, "k", []byte("second")); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
+	require.NoError(t, SetSetting(db, "k", []byte("first")))
+	require.NoError(t, SetSetting(db, "k", []byte("second")))
 	got, err := GetSetting(db, "k")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "second" {
-		t.Errorf("got %q, want second", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "second", string(got))
 }
 
 func TestIsSetUp(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 
 	ok, err := IsSetUp(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ok {
-		t.Error("fresh DB should not be set up")
-	}
+	require.NoError(t, err)
+	assert.False(t, ok, "fresh DB should not be set up")
 
-	if err := SetSetting(db, SettingPassphraseVerifier, []byte("verifier-bytes")); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, SetSetting(db, SettingPassphraseVerifier, []byte("verifier-bytes")))
 
 	ok, err = IsSetUp(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Error("DB with passphrase_verifier should be set up")
-	}
+	require.NoError(t, err)
+	assert.True(t, ok, "DB with passphrase_verifier should be set up")
 }
 
 func TestSettings_NilValueRoundTrip(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetSetting(db, "k", nil); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
+	require.NoError(t, SetSetting(db, "k", nil))
 	got, err := GetSetting(db, "k")
-	if err != nil {
-		t.Fatalf("GetSetting after nil set: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("got %d bytes, want 0", len(got))
-	}
+	require.NoError(t, err, "GetSetting after nil set")
+	assert.Empty(t, got)
 }

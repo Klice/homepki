@@ -1,16 +1,16 @@
 package store
 
 import (
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInsertAndGetLatestCRL(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	rootID, _, _ := seed(t, db)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -21,37 +21,24 @@ func TestInsertAndGetLatestCRL(t *testing.T) {
 		NextUpdate:   now.Add(7 * 24 * time.Hour),
 		DER:          []byte{0x01, 0x02, 0x03},
 	}
-	if err := InsertCRL(db, crl); err != nil {
-		t.Fatalf("InsertCRL: %v", err)
-	}
+	require.NoError(t, InsertCRL(db, crl), "InsertCRL")
 
 	got, err := GetLatestCRL(db, rootID)
-	if err != nil {
-		t.Fatalf("GetLatestCRL: %v", err)
-	}
-	if got.CRLNumber != 1 {
-		t.Errorf("CRLNumber: got %d, want 1", got.CRLNumber)
-	}
-	if string(got.DER) != "\x01\x02\x03" {
-		t.Errorf("DER mismatch: got %x", got.DER)
-	}
+	require.NoError(t, err, "GetLatestCRL")
+	assert.Equal(t, int64(1), got.CRLNumber)
+	assert.Equal(t, []byte{0x01, 0x02, 0x03}, got.DER)
 }
 
 func TestGetLatestCRL_NotFound(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := GetLatestCRL(db, "no-such-issuer"); !errors.Is(err, ErrCRLNotFound) {
-		t.Errorf("got %v, want ErrCRLNotFound", err)
-	}
+	require.NoError(t, Migrate(db))
+	_, err := GetLatestCRL(db, "no-such-issuer")
+	assert.ErrorIs(t, err, ErrCRLNotFound)
 }
 
 func TestGetLatestCRL_PicksHighestNumber(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	rootID, _, _ := seed(t, db)
 
 	now := time.Now().UTC()
@@ -63,56 +50,36 @@ func TestGetLatestCRL_PicksHighestNumber(t *testing.T) {
 			NextUpdate:   now.Add(time.Hour),
 			DER:          []byte{byte(n)},
 		}
-		if err := InsertCRL(db, c); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, InsertCRL(db, c))
 	}
 	got, err := GetLatestCRL(db, rootID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.CRLNumber != 3 {
-		t.Errorf("got %d, want 3", got.CRLNumber)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), got.CRLNumber)
 }
 
 func TestNextCRLNumber(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	rootID, _, _ := seed(t, db)
 
 	// No CRLs yet → 1.
 	n, err := NextCRLNumber(db, rootID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Errorf("first: got %d, want 1", n)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n, "first")
 
-	if err := InsertCRL(db, &CRL{
+	require.NoError(t, InsertCRL(db, &CRL{
 		IssuerCertID: rootID, CRLNumber: 7,
 		ThisUpdate: time.Now(), NextUpdate: time.Now().Add(time.Hour),
 		DER: []byte{0xff},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}))
 	n, err = NextCRLNumber(db, rootID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 8 {
-		t.Errorf("after 7: got %d, want 8", n)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, int64(8), n, "after 7")
 }
 
 func TestInsertCRL_PKConflict(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	rootID, _, _ := seed(t, db)
 
 	c := &CRL{
@@ -120,106 +87,62 @@ func TestInsertCRL_PKConflict(t *testing.T) {
 		ThisUpdate: time.Now(), NextUpdate: time.Now().Add(time.Hour),
 		DER: []byte{0x00},
 	}
-	if err := InsertCRL(db, c); err != nil {
-		t.Fatal(err)
-	}
-	if err := InsertCRL(db, c); err == nil {
-		t.Error("expected PK conflict on duplicate (issuer, number), got nil")
-	}
+	require.NoError(t, InsertCRL(db, c))
+	assert.Error(t, InsertCRL(db, c), "expected PK conflict on duplicate (issuer, number)")
 }
 
 func TestListRevokedChildren(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	rootID, interID, leafID := seed(t, db)
 	_ = interID
 
 	// Initially no revocations.
 	children, err := ListRevokedChildren(db, rootID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(children) != 0 {
-		t.Errorf("got %d, want 0", len(children))
-	}
+	require.NoError(t, err)
+	assert.Empty(t, children)
 
 	// Revoke the intermediate (which is a child of root).
-	if _, err := MarkRevoked(db, interID, 4, time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	_, err = MarkRevoked(db, interID, 4, time.Now())
+	require.NoError(t, err)
 	children, err = ListRevokedChildren(db, rootID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(children) != 1 {
-		t.Fatalf("got %d, want 1", len(children))
-	}
-	if children[0].SerialNumber != "01" {
-		t.Errorf("serial: got %q, want 01", children[0].SerialNumber)
-	}
-	if children[0].ReasonCode != 4 {
-		t.Errorf("reason: got %d, want 4 (superseded)", children[0].ReasonCode)
-	}
+	require.NoError(t, err)
+	require.Len(t, children, 1)
+	assert.Equal(t, "01", children[0].SerialNumber)
+	assert.Equal(t, 4, children[0].ReasonCode, "reason: want 4 (superseded)")
 
 	// Revoke the leaf (child of intermediate, not root) — should not appear
 	// in root's CRL.
-	if _, err := MarkRevoked(db, leafID, 1, time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	_, err = MarkRevoked(db, leafID, 1, time.Now())
+	require.NoError(t, err)
 	children, err = ListRevokedChildren(db, rootID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(children) != 1 {
-		t.Errorf("root CRL should still have 1 entry (the intermediate); got %d", len(children))
-	}
+	require.NoError(t, err)
+	assert.Len(t, children, 1, "root CRL should still have 1 entry (the intermediate)")
 }
 
 func TestMarkRevoked_Idempotent(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	_, _, leafID := seed(t, db)
 
 	n, err := MarkRevoked(db, leafID, 1, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Errorf("first: got %d, want 1", n)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "first")
 
 	// Second call returns 0 — the cert is already revoked.
 	n, err = MarkRevoked(db, leafID, 1, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Errorf("second: got %d, want 0 (already revoked)", n)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 0, n, "second: already revoked")
 
 	got, err := GetCert(db, leafID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != "revoked" {
-		t.Errorf("status: got %q, want revoked", got.Status)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "revoked", got.Status)
 }
 
 func TestMarkRevoked_Nonexistent(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	n, err := MarkRevoked(db, "no-such-id", 0, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Errorf("got %d, want 0", n)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
 }

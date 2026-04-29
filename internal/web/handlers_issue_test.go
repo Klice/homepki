@@ -5,6 +5,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // extractFormToken pulls form_token out of a rendered body, mirroring the
@@ -13,14 +16,10 @@ func extractFormToken(t *testing.T, body string) string {
 	t.Helper()
 	const marker = `name="form_token" value="`
 	i := strings.Index(body, marker)
-	if i < 0 {
-		t.Fatalf("form_token not found in body:\n%s", body[:min(500, len(body))])
-	}
+	require.GreaterOrEqual(t, i, 0, "form_token not found in body:\n%s", body[:min(500, len(body))])
 	rest := body[i+len(marker):]
 	end := strings.Index(rest, `"`)
-	if end < 0 {
-		t.Fatal("form_token closing quote not found")
-	}
+	require.GreaterOrEqual(t, end, 0, "form_token closing quote not found")
 	return rest[:end]
 }
 
@@ -33,9 +32,7 @@ func TestIssueRoot_FullFlow(t *testing.T) {
 
 	// 1. GET the form, get a form_token.
 	w := c.get("/certs/new/root")
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /certs/new/root: %d", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code, "GET /certs/new/root")
 	formTok := extractFormToken(t, w.Body.String())
 
 	// 2. POST with valid fields → 303 to /certs/{id}.
@@ -47,35 +44,21 @@ func TestIssueRoot_FullFlow(t *testing.T) {
 		"form_token":      {formTok},
 	}
 	w = c.postForm("/certs/new/root", form)
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("POST /certs/new/root: status=%d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "POST /certs/new/root")
 	loc := w.Header().Get("Location")
-	if !strings.HasPrefix(loc, "/certs/") {
-		t.Fatalf("Location: got %q, want /certs/...", loc)
-	}
+	require.True(t, strings.HasPrefix(loc, "/certs/"), "Location: got %q, want /certs/...", loc)
 	rootID := strings.TrimPrefix(loc, "/certs/")
 
 	// 3. GET / shows the new root in the authorities table.
 	w = c.get("/")
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /: %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "E2E Test Root") {
-		t.Errorf("index missing the new root cert")
-	}
-	if !strings.Contains(w.Body.String(), `href="/certs/`+rootID+`"`) {
-		t.Errorf("index missing link to /certs/%s", rootID)
-	}
+	require.Equal(t, http.StatusOK, w.Code, "GET /")
+	assert.Contains(t, w.Body.String(), "E2E Test Root", "index missing the new root cert")
+	assert.Contains(t, w.Body.String(), `href="/certs/`+rootID+`"`, "index missing link to /certs/%s", rootID)
 
 	// 4. GET the detail page.
 	w = c.get("/certs/" + rootID)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /certs/%s: %d", rootID, w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "self-signed") {
-		t.Error("root detail missing 'self-signed'")
-	}
+	require.Equal(t, http.StatusOK, w.Code, "GET /certs/%s", rootID)
+	assert.Contains(t, w.Body.String(), "self-signed", "root detail missing 'self-signed'")
 }
 
 func TestIssueRoot_RejectsMissingCN(t *testing.T) {
@@ -92,12 +75,8 @@ func TestIssueRoot_RejectsMissingCN(t *testing.T) {
 		"validity_days":   {"3650"},
 		"form_token":      {formTok},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "Common name is required") {
-		t.Errorf("expected CN error in body")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "Common name is required")
 }
 
 func TestIssueRoot_StaleFormTokenRejected(t *testing.T) {
@@ -114,12 +93,8 @@ func TestIssueRoot_StaleFormTokenRejected(t *testing.T) {
 		"validity_days":   {"3650"},
 		"form_token":      {"deadbeef-not-a-real-token"},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "stale form") {
-		t.Errorf("expected stale-form message")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "stale form")
 }
 
 func TestIssueRoot_FormTokenReplayReturnsSameURL(t *testing.T) {
@@ -138,26 +113,18 @@ func TestIssueRoot_FormTokenReplayReturnsSameURL(t *testing.T) {
 		"form_token":      {formTok},
 	}
 	w = c.postForm("/certs/new/root", form)
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("first POST: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "first POST")
 	firstLoc := w.Header().Get("Location")
 
 	// Replay the same form token — should redirect to the same URL without
 	// creating a second cert.
 	w = c.postForm("/certs/new/root", form)
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("replay POST: %d body=%q", w.Code, w.Body.String())
-	}
-	if w.Header().Get("Location") != firstLoc {
-		t.Errorf("replay Location: got %q, want %q", w.Header().Get("Location"), firstLoc)
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "replay POST")
+	assert.Equal(t, firstLoc, w.Header().Get("Location"), "replay Location")
 
 	// Confirm only one cert was created (check the index).
 	w = c.get("/")
-	if got := strings.Count(w.Body.String(), "Replay Root"); got != 1 {
-		t.Errorf("expected 1 'Replay Root' on index, got %d", got)
-	}
+	assert.Equal(t, 1, strings.Count(w.Body.String(), "Replay Root"), "expected 1 'Replay Root' on index")
 }
 
 func TestIssueIntermediate_RequiresParent(t *testing.T) {
@@ -168,12 +135,8 @@ func TestIssueIntermediate_RequiresParent(t *testing.T) {
 
 	// With no roots in the DB, the intermediate form shows a message and no form.
 	w := c.get("/certs/new/intermediate")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "No root CAs available") {
-		t.Errorf("expected 'No root CAs available' message")
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "No root CAs available")
 }
 
 func TestIssueChain_RootIntermediateLeaf(t *testing.T) {
@@ -211,9 +174,7 @@ func TestIssueChain_RootIntermediateLeaf(t *testing.T) {
 
 	// 4. Detail page on leaf shows full chain.
 	w := c.get("/certs/" + leafID)
-	if w.Code != http.StatusOK {
-		t.Fatalf("leaf detail: %d", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code, "leaf detail")
 	body := w.Body.String()
 	for _, want := range []string{
 		"Chain Root",
@@ -222,9 +183,7 @@ func TestIssueChain_RootIntermediateLeaf(t *testing.T) {
 		`href="/certs/` + interID + `"`,
 		`href="/certs/` + rootID + `"`,
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("leaf detail missing %q", want)
-		}
+		assert.Contains(t, body, want)
 	}
 }
 
@@ -252,12 +211,8 @@ func TestIssueLeaf_RequiresSAN(t *testing.T) {
 		"validity_days":   {"90"},
 		"form_token":      {formTok},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "At least one SAN") {
-		t.Errorf("expected SAN error in body")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "At least one SAN")
 }
 
 func TestIssueRoot_RedirectsToUnlockWhenLocked(t *testing.T) {
@@ -267,9 +222,8 @@ func TestIssueRoot_RedirectsToUnlockWhenLocked(t *testing.T) {
 
 	c := newClient(t, srv)
 	w := c.get("/certs/new/root")
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 // mustIssue runs the GET-then-POST cycle for an issue endpoint and returns
@@ -277,17 +231,11 @@ func TestIssueRoot_RedirectsToUnlockWhenLocked(t *testing.T) {
 func mustIssue(t *testing.T, c *clientLite, path string, form url.Values) string {
 	t.Helper()
 	w := c.get(path)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET %s: %d body=%q", path, w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code, "GET %s", path)
 	form.Set("form_token", extractFormToken(t, w.Body.String()))
 	w = c.postForm(path, form)
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("POST %s: %d body=%q", path, w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "POST %s", path)
 	loc := w.Header().Get("Location")
-	if !strings.HasPrefix(loc, "/certs/") {
-		t.Fatalf("POST %s Location: %q", path, loc)
-	}
+	require.True(t, strings.HasPrefix(loc, "/certs/"), "POST %s Location: %q", path, loc)
 	return strings.TrimPrefix(loc, "/certs/")
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
 	"github.com/Klice/homepki/internal/config"
@@ -23,17 +25,11 @@ import (
 func testServer(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
 	db, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
+	require.NoError(t, err, "store.Open")
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	require.NoError(t, store.Migrate(db), "Migrate")
 	srv, err := New(config.Config{CRLBaseURL: "https://test.lan"}, db, crypto.NewKeystore())
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	require.NoError(t, err, "New")
 	return srv, db
 }
 
@@ -110,21 +106,11 @@ func fastSetup(t *testing.T, srv *Server, db *sql.DB) {
 	params := crypto.KDFParams{Time: 1, Memory: 64, Threads: 1, KeyLen: 32}
 	paramsJSON := []byte(`{"time":1,"memory":64,"threads":1,"key_len":32}`)
 	kek, err := crypto.DeriveKEK([]byte(validPassphrase), salt, params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetSetting(db, store.SettingKDFSalt, salt); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetSetting(db, store.SettingKDFParams, paramsJSON); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetSetting(db, store.SettingPassphraseVerifier, crypto.Verifier(kek)); err != nil {
-		t.Fatal(err)
-	}
-	if err := srv.keystore.Install(kek); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, store.SetSetting(db, store.SettingKDFSalt, salt))
+	require.NoError(t, store.SetSetting(db, store.SettingKDFParams, paramsJSON))
+	require.NoError(t, store.SetSetting(db, store.SettingPassphraseVerifier, crypto.Verifier(kek)))
+	require.NoError(t, srv.keystore.Install(kek))
 }
 
 // ---------------- index dispatcher ----------------
@@ -134,12 +120,8 @@ func TestIndex_RedirectsToSetupWhenNotSetUp(t *testing.T) {
 	c := newClient(t, srv)
 
 	w := c.get("/")
-	if w.Code != http.StatusSeeOther {
-		t.Errorf("status: got %d, want 303", w.Code)
-	}
-	if loc := w.Header().Get("Location"); loc != "/setup" {
-		t.Errorf("Location: got %q, want /setup", loc)
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/setup", w.Header().Get("Location"))
 }
 
 func TestIndex_RedirectsToUnlockWhenSetUpButLocked(t *testing.T) {
@@ -149,12 +131,8 @@ func TestIndex_RedirectsToUnlockWhenSetUpButLocked(t *testing.T) {
 
 	c := newClient(t, srv)
 	w := c.get("/")
-	if w.Code != http.StatusSeeOther {
-		t.Errorf("status: got %d, want 303", w.Code)
-	}
-	if loc := w.Header().Get("Location"); loc != "/unlock" {
-		t.Errorf("Location: got %q, want /unlock", loc)
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 func TestIndex_RendersWhenUnlockedWithSession(t *testing.T) {
@@ -165,22 +143,14 @@ func TestIndex_RendersWhenUnlockedWithSession(t *testing.T) {
 	// Establish a session by setting the cookie ourselves (simulating a
 	// successful unlock).
 	secret, err := srv.keystore.DeriveSessionSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	value, err := SignSession(secret)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	c.cookies[SessionCookieName] = &http.Cookie{Name: SessionCookieName, Value: value}
 
 	w := c.get("/")
-	if w.Code != http.StatusOK {
-		t.Errorf("status: got %d, want 200, body=%q", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "unlocked") {
-		t.Errorf("body did not contain unlocked indicator:\n%s", w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "unlocked")
 }
 
 func TestIndex_OnlyExactRoot(t *testing.T) {
@@ -188,9 +158,7 @@ func TestIndex_OnlyExactRoot(t *testing.T) {
 	fastSetup(t, srv, db)
 	c := newClient(t, srv)
 	w := c.get("/no-such-path")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status: got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // ---------------- setup ----------------
@@ -199,16 +167,10 @@ func TestSetupGet_RendersForm(t *testing.T) {
 	srv, _ := testServer(t)
 	c := newClient(t, srv)
 	w := c.get("/setup")
-	if w.Code != http.StatusOK {
-		t.Errorf("status: got %d, want 200", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	if !strings.Contains(body, `name="passphrase"`) {
-		t.Error("setup form missing passphrase field")
-	}
-	if !strings.Contains(body, `name="csrf_token"`) {
-		t.Error("setup form missing csrf_token field")
-	}
+	assert.Contains(t, body, `name="passphrase"`)
+	assert.Contains(t, body, `name="csrf_token"`)
 }
 
 func TestSetupGet_RedirectsToUnlockWhenAlreadySetUp(t *testing.T) {
@@ -216,9 +178,8 @@ func TestSetupGet_RedirectsToUnlockWhenAlreadySetUp(t *testing.T) {
 	fastSetup(t, srv, db)
 	c := newClient(t, srv)
 	w := c.get("/setup")
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 func TestSetupPost_RejectsShortPassphrase(t *testing.T) {
@@ -227,12 +188,8 @@ func TestSetupPost_RejectsShortPassphrase(t *testing.T) {
 	c.get("/setup") // prime CSRF cookie
 
 	w := c.postForm("/setup", url.Values{"passphrase": {"short"}, "passphrase2": {"short"}})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want 400", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "at least 12 characters") {
-		t.Errorf("expected length error in body, got:\n%s", w.Body.String())
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "at least 12 characters")
 }
 
 func TestSetupPost_RejectsMismatch(t *testing.T) {
@@ -244,12 +201,8 @@ func TestSetupPost_RejectsMismatch(t *testing.T) {
 		"passphrase":  {"correct horse battery"},
 		"passphrase2": {"correct horse battery!"},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want 400", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "do not match") {
-		t.Errorf("expected mismatch error in body, got:\n%s", w.Body.String())
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "do not match")
 }
 
 // ---------------- unlock ----------------
@@ -258,9 +211,8 @@ func TestUnlockGet_RedirectsToSetupWhenNotSetUp(t *testing.T) {
 	srv, _ := testServer(t)
 	c := newClient(t, srv)
 	w := c.get("/unlock")
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/setup" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/setup", w.Header().Get("Location"))
 }
 
 func TestUnlockGet_RendersFormWhenSetUpAndLocked(t *testing.T) {
@@ -270,12 +222,8 @@ func TestUnlockGet_RendersFormWhenSetUpAndLocked(t *testing.T) {
 
 	c := newClient(t, srv)
 	w := c.get("/unlock")
-	if w.Code != http.StatusOK {
-		t.Errorf("status: got %d, want 200", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), `name="passphrase"`) {
-		t.Error("unlock form missing passphrase field")
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `name="passphrase"`)
 }
 
 func TestUnlockPost_WrongPassphrase(t *testing.T) {
@@ -286,15 +234,9 @@ func TestUnlockPost_WrongPassphrase(t *testing.T) {
 	c := newClient(t, srv)
 	c.get("/unlock") // prime CSRF cookie
 	w := c.postForm("/unlock", url.Values{"passphrase": {"definitely-wrong"}})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status: got %d, want 400", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "Incorrect passphrase") {
-		t.Errorf("expected 'Incorrect passphrase' in body, got:\n%s", w.Body.String())
-	}
-	if srv.keystore.IsUnlocked() {
-		t.Error("keystore should remain locked after wrong passphrase")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "Incorrect passphrase")
+	assert.False(t, srv.keystore.IsUnlocked(), "keystore should remain locked after wrong passphrase")
 }
 
 func TestUnlockPost_CorrectPassphraseInstallsKEKAndSession(t *testing.T) {
@@ -306,15 +248,10 @@ func TestUnlockPost_CorrectPassphraseInstallsKEKAndSession(t *testing.T) {
 	c.get("/unlock") // prime CSRF cookie
 	w := c.postForm("/unlock", url.Values{"passphrase": {validPassphrase}})
 
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
-	if !srv.keystore.IsUnlocked() {
-		t.Error("keystore should be unlocked after correct passphrase")
-	}
-	if c.cookies[SessionCookieName] == nil {
-		t.Error("session cookie not issued")
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/", w.Header().Get("Location"))
+	assert.True(t, srv.keystore.IsUnlocked(), "keystore should be unlocked after correct passphrase")
+	assert.NotNil(t, c.cookies[SessionCookieName], "session cookie not issued")
 }
 
 // ---------------- lock ----------------
@@ -325,23 +262,15 @@ func TestLock_ZeroesKEKAndClearsSession(t *testing.T) {
 
 	c := newClient(t, srv)
 	c.get("/unlock")
-	if w := c.postForm("/unlock", url.Values{"passphrase": {validPassphrase}}); w.Code != http.StatusSeeOther {
-		t.Fatalf("unlock failed: %d %q", w.Code, w.Body.String())
-	}
-	if c.cookies[SessionCookieName] == nil {
-		t.Fatal("session cookie missing after unlock")
-	}
+	w := c.postForm("/unlock", url.Values{"passphrase": {validPassphrase}})
+	require.Equal(t, http.StatusSeeOther, w.Code, "unlock failed")
+	require.NotNil(t, c.cookies[SessionCookieName], "session cookie missing after unlock")
 
-	w := c.postForm("/lock", url.Values{})
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
-	if srv.keystore.IsUnlocked() {
-		t.Error("keystore should be locked")
-	}
-	if c.cookies[SessionCookieName] != nil {
-		t.Error("session cookie should be cleared")
-	}
+	w = c.postForm("/lock", url.Values{})
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
+	assert.False(t, srv.keystore.IsUnlocked(), "keystore should be locked")
+	assert.Nil(t, c.cookies[SessionCookieName], "session cookie should be cleared")
 }
 
 func TestLock_IsIdempotent(t *testing.T) {
@@ -352,13 +281,9 @@ func TestLock_IsIdempotent(t *testing.T) {
 	// /setup renders the first-run form which carries the token.
 	c.get("/setup")
 	w := c.postForm("/lock", url.Values{})
-	if w.Code != http.StatusSeeOther {
-		t.Errorf("first lock: got %d, want 303", w.Code)
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code, "first lock")
 	w = c.postForm("/lock", url.Values{})
-	if w.Code != http.StatusSeeOther {
-		t.Errorf("second lock: got %d, want 303", w.Code)
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code, "second lock")
 }
 
 // ---------------- end-to-end ----------------
@@ -368,40 +293,31 @@ func TestEndToEnd_SetupUnlockLockUnlock(t *testing.T) {
 	c := newClient(t, srv)
 
 	// 1. Visit /; redirected to /setup
-	if w := c.get("/"); w.Header().Get("Location") != "/setup" {
-		t.Fatalf("expected redirect to /setup, got %q (status %d)", w.Header().Get("Location"), w.Code)
-	}
+	w := c.get("/")
+	require.Equal(t, "/setup", w.Header().Get("Location"), "expected redirect to /setup")
 
 	// 2. GET /setup primes CSRF; POST /setup writes verifier and installs KEK
 	c.get("/setup")
-	w := c.postForm("/setup", url.Values{
+	w = c.postForm("/setup", url.Values{
 		"passphrase":  {validPassphrase},
 		"passphrase2": {validPassphrase},
 	})
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
-		t.Fatalf("setup failed: status=%d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "setup failed")
+	require.Equal(t, "/", w.Header().Get("Location"), "setup failed")
 
 	// 3. /lock zeroes KEK and clears session
-	if w := c.postForm("/lock", url.Values{}); w.Code != http.StatusSeeOther {
-		t.Fatalf("lock failed: %d", w.Code)
-	}
+	w = c.postForm("/lock", url.Values{})
+	require.Equal(t, http.StatusSeeOther, w.Code, "lock failed")
 
 	// 4. GET / now redirects to /unlock
-	if w := c.get("/"); w.Header().Get("Location") != "/unlock" {
-		t.Fatalf("expected redirect to /unlock, got %q", w.Header().Get("Location"))
-	}
+	w = c.get("/")
+	require.Equal(t, "/unlock", w.Header().Get("Location"), "expected redirect to /unlock")
 
 	// 5. Re-unlock; back at /
 	c.get("/unlock")
-	if w := c.postForm("/unlock", url.Values{"passphrase": {validPassphrase}}); w.Code != http.StatusSeeOther {
-		t.Fatalf("unlock failed: %d body=%q", w.Code, w.Body.String())
-	}
+	w = c.postForm("/unlock", url.Values{"passphrase": {validPassphrase}})
+	require.Equal(t, http.StatusSeeOther, w.Code, "unlock failed")
 	w = c.get("/")
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 at /, got %d body=%q", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "unlocked") {
-		t.Errorf("index missing 'unlocked' indicator:\n%s", w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code, "expected 200 at /")
+	assert.Contains(t, w.Body.String(), "unlocked")
 }

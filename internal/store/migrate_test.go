@@ -3,22 +3,20 @@ package store
 import (
 	"database/sql"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMigrate_AppliesV1Schema(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	require.NoError(t, Migrate(db), "Migrate")
 
 	// Migration 0001 should be recorded.
 	var version int
-	if err := db.QueryRow(`SELECT version FROM schema_migrations`).Scan(&version); err != nil {
-		t.Fatalf("read schema_migrations: %v", err)
-	}
-	if version != 1 {
-		t.Errorf("schema_migrations version: got %d, want 1", version)
-	}
+	require.NoError(t, db.QueryRow(`SELECT version FROM schema_migrations`).Scan(&version),
+		"read schema_migrations")
+	assert.Equal(t, 1, version, "schema_migrations version")
 
 	// All v1 tables should exist.
 	want := []string{
@@ -34,50 +32,34 @@ func TestMigrate_AppliesV1Schema(t *testing.T) {
 		err := db.QueryRow(
 			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table,
 		).Scan(&name)
-		if err != nil {
-			t.Errorf("table %q missing: %v", table, err)
-		}
+		assert.NoError(t, err, "table %q missing", table)
 	}
 }
 
 func TestMigrate_Idempotent(t *testing.T) {
 	db := openTestDB(t)
 
-	if err := Migrate(db); err != nil {
-		t.Fatalf("first Migrate: %v", err)
-	}
+	require.NoError(t, Migrate(db), "first Migrate")
 	var first int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&first); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&first))
 
-	if err := Migrate(db); err != nil {
-		t.Fatalf("second Migrate: %v", err)
-	}
+	require.NoError(t, Migrate(db), "second Migrate")
 	var second int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&second); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&second))
 
-	if first != second {
-		t.Errorf("schema_migrations row count changed across runs: %d → %d", first, second)
-	}
+	assert.Equal(t, first, second, "schema_migrations row count changed across runs")
 }
 
 func TestMigrate_EnforcesForeignKeyAndCheckConstraints(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 
 	// FK on cert_keys.cert_id should reject orphan rows.
 	_, err := db.Exec(`
 		INSERT INTO cert_keys (cert_id, wrapped_dek, dek_nonce, cipher_nonce, ciphertext)
 		VALUES ('does-not-exist', x'00', x'00', x'00', x'00')
 	`)
-	if err == nil {
-		t.Error("expected FK violation inserting orphan cert_keys row, got nil")
-	}
+	assert.Error(t, err, "expected FK violation inserting orphan cert_keys row")
 
 	// CHECK constraint on certificates.type should reject unknown types.
 	_, err = db.Exec(`
@@ -89,9 +71,7 @@ func TestMigrate_EnforcesForeignKeyAndCheckConstraints(t *testing.T) {
 			'2026-01-01', '2027-01-01', x'00', 'fp'
 		)
 	`)
-	if err == nil {
-		t.Error("expected CHECK violation on certificates.type='gibberish', got nil")
-	}
+	assert.Error(t, err, "expected CHECK violation on certificates.type='gibberish'")
 }
 
 // openTestDB returns a fresh on-disk SQLite DB in a temp dir, with the same
@@ -100,9 +80,7 @@ func TestMigrate_EnforcesForeignKeyAndCheckConstraints(t *testing.T) {
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := Open(t.TempDir())
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	require.NoError(t, err, "Open")
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }

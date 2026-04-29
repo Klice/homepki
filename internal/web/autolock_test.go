@@ -7,6 +7,8 @@ import (
 
 	"github.com/Klice/homepki/internal/config"
 	"github.com/Klice/homepki/internal/crypto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func testCfg(mins int, passphrase string) config.Config {
@@ -31,9 +33,7 @@ func waitForLocked(t *testing.T, ks *crypto.Keystore, timeout time.Duration) {
 func newUnlockedKeystore(t *testing.T) *crypto.Keystore {
 	t.Helper()
 	ks := crypto.NewKeystore()
-	if err := ks.Install(make([]byte, crypto.KeyLen)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, ks.Install(make([]byte, crypto.KeyLen)))
 	return ks
 }
 
@@ -55,9 +55,7 @@ func TestIdleLocker_TouchResets(t *testing.T) {
 	for range 5 {
 		l.Touch()
 		time.Sleep(20 * time.Millisecond)
-		if !ks.IsUnlocked() {
-			t.Fatal("locker fired despite recent Touch")
-		}
+		require.True(t, ks.IsUnlocked(), "locker fired despite recent Touch")
 	}
 	// Stop touching — within ~50ms it should fire.
 	waitForLocked(t, ks, 200*time.Millisecond)
@@ -68,9 +66,7 @@ func TestIdleLocker_DisabledIsNoOp(t *testing.T) {
 	l := newIdleLocker(ks, 0) // disabled
 	l.Touch()
 	time.Sleep(30 * time.Millisecond)
-	if !ks.IsUnlocked() {
-		t.Error("disabled locker should never fire")
-	}
+	assert.True(t, ks.IsUnlocked(), "disabled locker should never fire")
 	l.Stop() // also a no-op
 }
 
@@ -80,9 +76,7 @@ func TestIdleLocker_StopCancelsPending(t *testing.T) {
 	l.Touch()
 	l.Stop()
 	time.Sleep(80 * time.Millisecond)
-	if !ks.IsUnlocked() {
-		t.Error("Stop should have cancelled the pending lock")
-	}
+	assert.True(t, ks.IsUnlocked(), "Stop should have cancelled the pending lock")
 }
 
 func TestIdleLocker_NilSafe(t *testing.T) {
@@ -116,8 +110,8 @@ func TestIdleLocker_ConcurrentTouches(t *testing.T) {
 // locker semantics.
 type atomicCounter struct{ n atomic.Int32 }
 
-func (c *atomicCounter) start()    { c.n.Add(1) }
-func (c *atomicCounter) done()     { c.n.Add(-1) }
+func (c *atomicCounter) start() { c.n.Add(1) }
+func (c *atomicCounter) done()  { c.n.Add(-1) }
 func (c *atomicCounter) waitDone() {
 	for c.n.Load() > 0 {
 		time.Sleep(time.Millisecond)
@@ -141,9 +135,7 @@ func TestRequireUnlocked_TouchesLocker(t *testing.T) {
 	for range 4 {
 		c.get("/")
 		time.Sleep(20 * time.Millisecond)
-		if !srv.keystore.IsUnlocked() {
-			t.Fatal("keystore locked despite recent authenticated request")
-		}
+		require.True(t, srv.keystore.IsUnlocked(), "keystore locked despite recent authenticated request")
 	}
 	// Stop touching — within ~40ms idle the locker should fire.
 	waitForLocked(t, srv.keystore, 200*time.Millisecond)
@@ -165,9 +157,7 @@ func TestAutoLockTimeout_DisabledByDefault(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			d := autoLockTimeout(testCfg(tc.mins, tc.pass))
-			if d != tc.want {
-				t.Errorf("got %v, want %v", d, tc.want)
-			}
+			assert.Equal(t, tc.want, d)
 		})
 	}
 }
