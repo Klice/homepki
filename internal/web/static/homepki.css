@@ -78,3 +78,116 @@ footer.app {
 .pill-warn  { background: #fdf3d8; color: #8a6300; }
 .pill-bad   { background: #fce8e6; color: #a8261a; }
 .pill-muted { background: #eceff2; color: #5b6470; }
+
+/* Filter / summary toolbar above the cert tables on /. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: end;
+  margin-bottom: 0.75rem;
+}
+.toolbar .summary {
+  color: var(--pico-muted-color);
+  font-size: 0.85rem;
+  margin-right: auto;
+}
+.toolbar .summary b { color: var(--pico-color); font-weight: 500; }
+.toolbar input[type="search"],
+.toolbar select {
+  margin: 0;
+  height: 2rem;
+  font-size: 0.85rem;
+}
+.toolbar input[type="search"] { width: 18rem; }
+
+/* Section heading row: title on the left, action links on the right. */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 1.25rem 0 0.4rem;
+}
+.section-head h2 { margin: 0; font-size: 0.95rem; font-weight: 500; }
+.section-head h2 small {
+  color: var(--pico-muted-color);
+  font-weight: 400;
+  margin-left: 0.4rem;
+}
+.section-head .actions a {
+  font-size: 0.83rem;
+  margin-left: 0.75rem;
+  text-decoration: none;
+}
+.section-head .actions a:hover { text-decoration: underline; }
+
+/* Compact "flat" table style. Lighter than pico's default for the
+   browse views where density matters more than emphasis. */
+table.flat {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  background: #fff;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 4px;
+}
+table.flat th {
+  font-weight: 500;
+  color: var(--pico-muted-color);
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  white-space: nowrap;
+  background: #fafbfc;
+}
+table.flat td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  vertical-align: top;
+}
+table.flat tr:last-child td { border-bottom: none; }
+table.flat tr:hover td { background: #fafbfc; }
+table.flat td.cn { font-weight: 500; }
+table.flat td.cn a { text-decoration: none; }
+table.flat td.cn a:hover { text-decoration: underline; }
+table.flat td .meta { display: block; }
+table.flat td.num,
+table.flat td.expires { font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.flat td.actions { text-align: right; white-space: nowrap; }
+table.flat td.actions a {
+  font-size: 0.8rem;
+  margin-left: 0.4rem;
+  text-decoration: none;
+}
+table.flat td.actions a:hover { text-decoration: underline; }
+table.flat td.actions .sep {
+  color: #d0d4d8;
+  margin: 0 0.15rem 0 0.55rem;
+  user-select: none;
+}
+
+/* Row-level meta and emphasis used inside .flat cells. */
+.type {
+  font-size: 0.7rem;
+  color: var(--pico-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.meta {
+  color: var(--pico-muted-color);
+  font-size: 0.78rem;
+  font-family: var(--pico-font-family-monospace);
+}
+.exp-bad strong  { color: #a8261a; }
+.exp-warn strong { color: #8a6300; }
+
+/* Empty-state card. */
+.empty {
+  padding: 1rem;
+  text-align: center;
+  color: var(--pico-muted-color);
+  font-size: 0.85rem;
+  background: #fff;
+  border: 1px dashed var(--pico-muted-border-color);
+  border-radius: 4px;
+}

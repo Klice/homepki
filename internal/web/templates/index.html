@@ -19,82 +19,140 @@
 {{end}}
 
 {{define "content"}}
-<section style="margin-bottom: 1.25rem;">
-  <header style="display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 0.4rem;">
-    <h2 style="margin: 0; font-size: 0.95rem; font-weight: 500;">
-      Authorities <small>roots and intermediates</small>
-    </h2>
-  </header>
-
-  {{if .Authorities}}
-  <table>
-    <thead>
-      <tr>
-        <th>Subject</th>
-        <th>Type</th>
-        <th>Key</th>
-        <th>Issuer</th>
-        <th>Expires</th>
-        <th>Status</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Authorities}}
-      <tr>
-        <td><a href="/certs/{{.ID}}">{{.SubjectCN}}</a></td>
-        <td>{{.Type}}</td>
-        <td>{{.KeyDisplay}}</td>
-        <td>{{.IssuerCN}}</td>
-        <td>{{.NotAfterDisplay}}<br><small>{{.RelativeExpiry}}</small></td>
-        <td><span class="pill {{.StatusPillClass}}">{{.EffectiveStatus}}</span></td>
-        <td><a href="/certs/{{.ID}}">view</a></td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-  {{else}}
-  <p><small>No authorities yet. Issuance UI is coming in the next release.</small></p>
+<form method="get" action="/" class="toolbar">
+  <input type="search" name="q" value="{{.Q}}"
+         placeholder="Filter by CN, SAN, serial, fingerprint…" autocomplete="off">
+  <select name="status">
+    <option value="">All statuses</option>
+    {{range .StatusOptions}}
+    <option value="{{.}}" {{if eq $.Status .}}selected{{end}}>{{.}}</option>
+    {{end}}
+  </select>
+  <button type="submit" class="secondary">Filter</button>
+  {{if .Active}}
+  <a href="/" role="button" class="secondary outline">Clear</a>
   {{end}}
-</section>
+</form>
 
-<section>
-  <header style="display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 0.4rem;">
-    <h2 style="margin: 0; font-size: 0.95rem; font-weight: 500;">
-      Leaf certificates <small>{{len .Leaves}} issued</small>
-    </h2>
-  </header>
+<div class="section-head">
+  <h2>
+    Authorities
+    <small>
+      {{if .Active}}{{len .Authorities}} of {{.TotalAuthorities}} match{{else}}roots and intermediates{{end}}
+    </small>
+  </h2>
+  <div class="actions">
+    <a href="/certs/new/root">+ Issue root</a>
+    <a href="/certs/new/intermediate">+ Issue intermediate</a>
+  </div>
+</div>
 
-  {{if .Leaves}}
-  <table>
-    <thead>
-      <tr>
-        <th>Subject / SANs</th>
-        <th>Key</th>
-        <th>Issuer</th>
-        <th>Expires</th>
-        <th>Status</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Leaves}}
-      <tr>
-        <td>
-          <a href="/certs/{{.ID}}">{{.SubjectCN}}</a>
-          {{if .SANsDisplay}}<br><small>{{.SANsDisplay}}</small>{{end}}
-        </td>
-        <td>{{.KeyDisplay}}</td>
-        <td>{{.IssuerCN}}</td>
-        <td>{{.NotAfterDisplay}}<br><small>{{.RelativeExpiry}}</small></td>
-        <td><span class="pill {{.StatusPillClass}}">{{.EffectiveStatus}}</span></td>
-        <td><a href="/certs/{{.ID}}">view</a></td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
+{{if .Authorities}}
+<table class="flat">
+  <thead><tr>
+    <th style="width:18rem;">Subject</th>
+    <th>Type</th>
+    <th>Key</th>
+    <th>Issuer</th>
+    <th>Expires</th>
+    <th>Status</th>
+    <th></th>
+  </tr></thead>
+  <tbody>
+    {{range .Authorities}}
+    <tr>
+      <td class="cn">
+        <a href="/certs/{{.ID}}">{{.SubjectCN}}</a>
+        <span class="meta">{{.FingerprintShort}}…</span>
+      </td>
+      <td><span class="type">{{.TypeDisplay}}</span></td>
+      <td>{{.KeyDisplay}}</td>
+      <td>{{if .ParentID}}{{.IssuerCN}}{{else}}<span class="meta">— self —</span>{{end}}</td>
+      <td class="expires {{if eq .EffectiveStatus "expired"}}exp-bad{{else if eq .EffectiveStatus "expiring"}}exp-warn{{end}}">
+        <strong>{{.NotAfterDisplay}}</strong> <span class="meta">{{.RelativeExpiry}}</span>
+      </td>
+      <td><span class="pill {{.StatusPillClass}}">{{.EffectiveStatus}}</span></td>
+      <td class="actions">
+        <a href="/certs/{{.ID}}">view</a>
+        <span class="sep">|</span>
+        <a href="/certs/{{.ID}}/cert.pem">cert.pem</a>
+        <a href="/crl/{{.ID}}.crl">crl</a>
+        <a href="/certs/{{.ID}}/crls">history</a>
+        {{if eq .Status "active"}}
+        <span class="sep">|</span>
+        <a href="/certs/{{.ID}}/rotate">rotate</a>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<div class="empty">
+  {{if .Active}}
+  No authorities match the current filter. <a href="/">Clear</a> to see all {{.TotalAuthorities}}.
   {{else}}
-  <p><small>No leaf certificates yet.</small></p>
+  No authorities yet.
   {{end}}
-</section>
+</div>
+{{end}}
+
+<div class="section-head">
+  <h2>
+    Leaf certificates
+    <small>
+      {{if .Active}}{{len .Leaves}} of {{.TotalLeaves}} match{{else}}{{.TotalLeaves}} issued{{end}}
+    </small>
+  </h2>
+  <div class="actions">
+    <a href="/certs/new/leaf">+ Issue leaf</a>
+  </div>
+</div>
+
+{{if .Leaves}}
+<table class="flat">
+  <thead><tr>
+    <th style="width:16rem;">Subject / SANs</th>
+    <th>Key</th>
+    <th>Issuer</th>
+    <th>Expires</th>
+    <th>Status</th>
+    <th></th>
+  </tr></thead>
+  <tbody>
+    {{range .Leaves}}
+    <tr>
+      <td class="cn">
+        <a href="/certs/{{.ID}}">{{.SubjectCN}}</a>
+        {{if .SANsDisplay}}<span class="meta">{{.SANsDisplay}} · {{.FingerprintShort}}…</span>{{else}}<span class="meta">{{.FingerprintShort}}…</span>{{end}}
+      </td>
+      <td>{{.KeyDisplay}}</td>
+      <td>{{.IssuerCN}}</td>
+      <td class="expires {{if eq .EffectiveStatus "expired"}}exp-bad{{else if eq .EffectiveStatus "expiring"}}exp-warn{{end}}">
+        <strong>{{.NotAfterDisplay}}</strong> <span class="meta">{{.RelativeExpiry}}</span>
+      </td>
+      <td><span class="pill {{.StatusPillClass}}">{{.EffectiveStatus}}</span></td>
+      <td class="actions">
+        <a href="/certs/{{.ID}}">view</a>
+        <span class="sep">|</span>
+        <a href="/certs/{{.ID}}/cert.pem">cert.pem</a>
+        <a href="/certs/{{.ID}}/fullchain.pem">fullchain.pem</a>
+        {{if eq .Status "active"}}
+        <span class="sep">|</span>
+        <a href="/certs/{{.ID}}/rotate">rotate</a>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<div class="empty">
+  {{if .Active}}
+  No leaves match the current filter. <a href="/">Clear</a> to see all {{.TotalLeaves}}.
+  {{else}}
+  No leaf certificates yet.
+  {{end}}
+</div>
+{{end}}
 {{end}}
