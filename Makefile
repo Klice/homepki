@@ -58,6 +58,10 @@ lint: ## golangci-lint (devcontainer has it pre-installed)
 smoke: ## end-to-end smoke against a real binary (curl + openssl assertions)
 	scripts/smoke.sh
 
+.PHONY: image
+image: ## build the production Docker image as homepki:dev
+	docker build -t homepki:dev .
+
 .PHONY: check
 check: vet test ## quick local CI: vet + test
 
