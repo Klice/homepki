@@ -5,31 +5,27 @@ import (
 	"errors"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewKeystore_StartsLocked(t *testing.T) {
 	k := NewKeystore()
-	if k.IsUnlocked() {
-		t.Error("new keystore should be locked")
-	}
+	assert.False(t, k.IsUnlocked(), "new keystore should be locked")
 }
 
 func TestKeystore_InstallUnlock(t *testing.T) {
 	k := NewKeystore()
-	if err := k.Install(make([]byte, KeyLen)); err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-	if !k.IsUnlocked() {
-		t.Error("keystore should be unlocked after Install")
-	}
+	require.NoError(t, k.Install(make([]byte, KeyLen)), "Install")
+	assert.True(t, k.IsUnlocked(), "keystore should be unlocked after Install")
 }
 
 func TestKeystore_InstallRejectsWrongKeyLen(t *testing.T) {
 	k := NewKeystore()
 	for _, badLen := range []int{0, 16, 24, 31, 33, 64} {
-		if err := k.Install(make([]byte, badLen)); err == nil {
-			t.Errorf("Install accepted %d-byte kek", badLen)
-		}
+		err := k.Install(make([]byte, badLen))
+		assert.Errorf(t, err, "Install accepted %d-byte kek", badLen)
 	}
 }
 
@@ -39,21 +35,15 @@ func TestKeystore_LockZeroesUnderlyingSlice(t *testing.T) {
 	for i := range original {
 		original[i] = 0xAB
 	}
-	if err := k.Install(original); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, k.Install(original))
 	// `original` is now owned by the keystore; capture the same pointer for
 	// post-Lock inspection.
 	captured := original
 
 	k.Lock()
-	if k.IsUnlocked() {
-		t.Error("IsUnlocked should be false after Lock")
-	}
+	assert.False(t, k.IsUnlocked(), "IsUnlocked should be false after Lock")
 	for i, b := range captured {
-		if b != 0 {
-			t.Errorf("Lock did not zero byte %d (got 0x%02X)", i, b)
-		}
+		assert.Equalf(t, byte(0), b, "Lock did not zero byte %d (got 0x%02X)", i, b)
 	}
 }
 
@@ -61,36 +51,25 @@ func TestKeystore_LockIsIdempotent(t *testing.T) {
 	k := NewKeystore()
 	k.Lock() // already locked; should not panic
 	k.Lock()
-	if k.IsUnlocked() {
-		t.Error("still unlocked after double Lock")
-	}
+	assert.False(t, k.IsUnlocked(), "still unlocked after double Lock")
 }
 
 func TestKeystore_InstallReplacesAndZeroesPrevious(t *testing.T) {
 	k := NewKeystore()
 	first := bytes.Repeat([]byte{0x11}, KeyLen)
-	if err := k.Install(first); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, k.Install(first))
 	captured := first
 
 	second := bytes.Repeat([]byte{0x22}, KeyLen)
-	if err := k.Install(second); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, k.Install(second))
 	for i, b := range captured {
-		if b != 0 {
-			t.Errorf("previous kek byte %d not zeroed (got 0x%02X)", i, b)
-		}
+		assert.Equalf(t, byte(0), b, "previous kek byte %d not zeroed (got 0x%02X)", i, b)
 	}
-	if err := k.With(func(kek []byte) error {
-		if !bytes.Equal(kek, second) {
-			t.Errorf("With saw stale kek: %x", kek)
-		}
+	err := k.With(func(kek []byte) error {
+		assert.Equal(t, second, kek, "With saw stale kek")
 		return nil
-	}); err != nil {
-		t.Fatalf("With: %v", err)
-	}
+	})
+	require.NoError(t, err, "With")
 }
 
 func TestKeystore_WithReturnsErrLockedWhenLocked(t *testing.T) {
@@ -100,39 +79,27 @@ func TestKeystore_WithReturnsErrLockedWhenLocked(t *testing.T) {
 		called = true
 		return nil
 	})
-	if !errors.Is(err, ErrLocked) {
-		t.Errorf("got %v, want ErrLocked", err)
-	}
-	if called {
-		t.Error("fn must not be invoked when keystore is locked")
-	}
+	assert.ErrorIs(t, err, ErrLocked)
+	assert.False(t, called, "fn must not be invoked when keystore is locked")
 }
 
 func TestKeystore_WithPropagatesFnError(t *testing.T) {
 	k := NewKeystore()
-	if err := k.Install(make([]byte, KeyLen)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, k.Install(make([]byte, KeyLen)))
 	want := errors.New("boom")
 	got := k.With(func(kek []byte) error { return want })
-	if !errors.Is(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
+	assert.ErrorIs(t, got, want)
 }
 
 func TestKeystore_ConcurrentAccess(t *testing.T) {
 	k := NewKeystore()
-	if err := k.Install(make([]byte, KeyLen)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, k.Install(make([]byte, KeyLen)))
 
 	var wg sync.WaitGroup
 	for range 50 {
 		wg.Go(func() {
 			_ = k.With(func(kek []byte) error {
-				if len(kek) != KeyLen {
-					t.Errorf("With saw kek of length %d", len(kek))
-				}
+				assert.Equal(t, KeyLen, len(kek))
 				return nil
 			})
 		})
@@ -153,15 +120,9 @@ func TestVerifier_DeterministicAndDistinct(t *testing.T) {
 	va2 := Verifier(a)
 	vb := Verifier(b)
 
-	if !bytes.Equal(va1, va2) {
-		t.Error("Verifier is not deterministic")
-	}
-	if bytes.Equal(va1, vb) {
-		t.Error("Verifier collides for distinct keys")
-	}
-	if len(va1) != 32 {
-		t.Errorf("verifier length: got %d, want 32 (HMAC-SHA256)", len(va1))
-	}
+	assert.Equal(t, va1, va2, "Verifier is not deterministic")
+	assert.False(t, bytes.Equal(va1, vb), "Verifier collides for distinct keys")
+	assert.Equal(t, 32, len(va1), "verifier length should be 32 (HMAC-SHA256)")
 }
 
 func TestVerifierEqual(t *testing.T) {
@@ -169,80 +130,50 @@ func TestVerifierEqual(t *testing.T) {
 	b := bytes.Repeat([]byte{0x01}, 32)
 	c := bytes.Repeat([]byte{0x02}, 32)
 
-	if !VerifierEqual(a, b) {
-		t.Error("identical bytes should compare equal")
-	}
-	if VerifierEqual(a, c) {
-		t.Error("differing bytes should not compare equal")
-	}
+	assert.True(t, VerifierEqual(a, b), "identical bytes should compare equal")
+	assert.False(t, VerifierEqual(a, c), "differing bytes should not compare equal")
 }
 
 func TestDeriveSessionSecret_DeterministicPerKEK(t *testing.T) {
 	k := NewKeystore()
 	kek := bytes.Repeat([]byte{0x42}, KeyLen)
-	if err := k.Install(append([]byte(nil), kek...)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, k.Install(append([]byte(nil), kek...)))
 
 	a, err := k.DeriveSessionSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	b, err := k.DeriveSessionSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(a, b) {
-		t.Error("DeriveSessionSecret is not deterministic for the same KEK")
-	}
-	if len(a) != SessionSecretLen {
-		t.Errorf("len: got %d, want %d", len(a), SessionSecretLen)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, a, b, "DeriveSessionSecret is not deterministic for the same KEK")
+	assert.Equal(t, SessionSecretLen, len(a))
 	// The session secret must not equal the KEK itself.
-	if bytes.Equal(a, kek) {
-		t.Error("session secret equals the KEK — HKDF derivation is broken")
-	}
+	assert.False(t, bytes.Equal(a, kek), "session secret equals the KEK — HKDF derivation is broken")
 }
 
 func TestDeriveSessionSecret_DifferentKEKDifferentSecret(t *testing.T) {
 	k := NewKeystore()
 
-	if err := k.Install(bytes.Repeat([]byte{0xAA}, KeyLen)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, k.Install(bytes.Repeat([]byte{0xAA}, KeyLen)))
 	a, err := k.DeriveSessionSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	if err := k.Install(bytes.Repeat([]byte{0xBB}, KeyLen)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, k.Install(bytes.Repeat([]byte{0xBB}, KeyLen)))
 	b, err := k.DeriveSessionSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	if bytes.Equal(a, b) {
-		t.Error("different KEKs produced identical session secrets")
-	}
+	assert.False(t, bytes.Equal(a, b), "different KEKs produced identical session secrets")
 }
 
 func TestDeriveSessionSecret_LockedReturnsErrLocked(t *testing.T) {
 	k := NewKeystore()
 	_, err := k.DeriveSessionSecret()
-	if !errors.Is(err, ErrLocked) {
-		t.Errorf("got %v, want ErrLocked", err)
-	}
+	assert.ErrorIs(t, err, ErrLocked)
 }
 
 func TestZero(t *testing.T) {
 	b := bytes.Repeat([]byte{0xAA}, 16)
 	Zero(b)
 	for i, v := range b {
-		if v != 0 {
-			t.Errorf("byte %d not zeroed: 0x%02X", i, v)
-		}
+		assert.Equalf(t, byte(0), v, "byte %d not zeroed: 0x%02X", i, v)
 	}
 }
 
@@ -252,19 +183,13 @@ func TestDeriveAndVerify_RoundTrip(t *testing.T) {
 	p := fastKDFParams()
 
 	kek, err := DeriveKEK(pw, salt, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	verifier := Verifier(kek)
 	Zero(kek)
 
 	got, err := DeriveAndVerify(pw, salt, p, verifier)
-	if err != nil {
-		t.Fatalf("DeriveAndVerify: %v", err)
-	}
-	if len(got) != int(p.KeyLen) {
-		t.Errorf("got len %d, want %d", len(got), p.KeyLen)
-	}
+	require.NoError(t, err, "DeriveAndVerify")
+	assert.Equal(t, int(p.KeyLen), len(got))
 }
 
 func TestDeriveAndVerify_WrongPassphrase(t *testing.T) {
@@ -272,24 +197,16 @@ func TestDeriveAndVerify_WrongPassphrase(t *testing.T) {
 	p := fastKDFParams()
 
 	kek, err := DeriveKEK([]byte("right"), salt, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	verifier := Verifier(kek)
 
 	_, err = DeriveAndVerify([]byte("wrong"), salt, p, verifier)
-	if !errors.Is(err, ErrPassphraseMismatch) {
-		t.Errorf("got %v, want ErrPassphraseMismatch", err)
-	}
+	assert.ErrorIs(t, err, ErrPassphraseMismatch)
 }
 
 func TestDeriveAndVerify_PropagatesDeriveErrors(t *testing.T) {
 	// Empty passphrase fails inside DeriveKEK before any verifier check.
 	_, err := DeriveAndVerify(nil, []byte("salt"), fastKDFParams(), []byte("verifier"))
-	if err == nil {
-		t.Error("expected error from empty passphrase")
-	}
-	if errors.Is(err, ErrPassphraseMismatch) {
-		t.Error("derive error should not be reported as ErrPassphraseMismatch")
-	}
+	assert.Error(t, err, "expected error from empty passphrase")
+	assert.NotErrorIs(t, err, ErrPassphraseMismatch, "derive error should not be reported as ErrPassphraseMismatch")
 }

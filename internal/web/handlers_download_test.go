@@ -6,9 +6,10 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
@@ -39,9 +40,7 @@ func decodePEMBlocks(t *testing.T, body []byte, blockType string) []*pem.Block {
 		if block == nil {
 			break
 		}
-		if block.Type != blockType {
-			t.Fatalf("unexpected PEM block type %q (want %q)", block.Type, blockType)
-		}
+		require.Equal(t, blockType, block.Type, "unexpected PEM block type")
 		out = append(out, block)
 	}
 	return out
@@ -53,48 +52,32 @@ func TestDownload_CertPEM_RoundTrip(t *testing.T) {
 	_, c, _, _, leafID := downloadFixture(t)
 
 	w := c.get("/certs/" + leafID + "/cert.pem")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d body=%q", w.Code, w.Body.String())
-	}
-	if got := w.Header().Get("Content-Type"); got != "application/x-pem-file" {
-		t.Errorf("Content-Type: %q", got)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/x-pem-file", w.Header().Get("Content-Type"))
 	disp := w.Header().Get("Content-Disposition")
-	if !strings.Contains(disp, `attachment;`) || !strings.Contains(disp, ".crt") {
-		t.Errorf("Content-Disposition: %q", disp)
-	}
-	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "private") {
-		t.Errorf("Cache-Control should be private (non-sensitive): %q", cc)
-	}
+	assert.Contains(t, disp, `attachment;`)
+	assert.Contains(t, disp, ".crt")
+	assert.Contains(t, w.Header().Get("Cache-Control"), "private", "Cache-Control should be private (non-sensitive)")
 
 	blocks := decodePEMBlocks(t, w.Body.Bytes(), pemBlockCertificate)
-	if len(blocks) != 1 {
-		t.Fatalf("blocks: got %d, want 1", len(blocks))
-	}
+	require.Len(t, blocks, 1, "blocks")
 	parsed, err := x509.ParseCertificate(blocks[0].Bytes)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if parsed.Subject.CommonName != "revoke.leaf.test" {
-		t.Errorf("CN: got %q", parsed.Subject.CommonName)
-	}
+	require.NoError(t, err, "parse")
+	assert.Equal(t, "revoke.leaf.test", parsed.Subject.CommonName, "CN")
 }
 
 func TestDownload_CertPEM_NotFound(t *testing.T) {
 	_, c, _, _, _ := downloadFixture(t)
 	w := c.get("/certs/no-such-id/cert.pem")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestDownload_CertPEM_RedirectsWhenLocked(t *testing.T) {
 	srv, c, _, _, leafID := downloadFixture(t)
 	srv.keystore.Lock()
 	w := c.get("/certs/" + leafID + "/cert.pem")
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 // ---- key.pem ----
@@ -103,40 +86,25 @@ func TestDownload_KeyPEM_RoundTrip(t *testing.T) {
 	_, c, _, _, leafID := downloadFixture(t)
 
 	w := c.get("/certs/" + leafID + "/key.pem")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d body=%q", w.Code, w.Body.String())
-	}
-	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
-		t.Errorf("Cache-Control should be no-store (sensitive): %q", cc)
-	}
-	if pr := w.Header().Get("Pragma"); pr != "no-cache" {
-		t.Errorf("Pragma: %q", pr)
-	}
-	disp := w.Header().Get("Content-Disposition")
-	if !strings.Contains(disp, ".key") {
-		t.Errorf("Content-Disposition should end in .key: %q", disp)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Cache-Control"), "no-store", "Cache-Control should be no-store (sensitive)")
+	assert.Equal(t, "no-cache", w.Header().Get("Pragma"))
+	assert.Contains(t, w.Header().Get("Content-Disposition"), ".key", "Content-Disposition should end in .key")
 
 	blocks := decodePEMBlocks(t, w.Body.Bytes(), pemBlockPrivateKey)
-	if len(blocks) != 1 {
-		t.Fatalf("blocks: got %d, want 1", len(blocks))
-	}
+	require.Len(t, blocks, 1, "blocks")
 	priv, err := x509.ParsePKCS8PrivateKey(blocks[0].Bytes)
-	if err != nil {
-		t.Fatalf("parse pkcs8: %v", err)
-	}
-	if _, ok := priv.(stdcrypto.Signer); !ok {
-		t.Errorf("decoded key %T is not a crypto.Signer", priv)
-	}
+	require.NoError(t, err, "parse pkcs8")
+	_, ok := priv.(stdcrypto.Signer)
+	assert.True(t, ok, "decoded key %T is not a crypto.Signer", priv)
 }
 
 func TestDownload_KeyPEM_RedirectsWhenLocked(t *testing.T) {
 	srv, c, _, _, leafID := downloadFixture(t)
 	srv.keystore.Lock()
 	w := c.get("/certs/" + leafID + "/key.pem")
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 // ---- chain.pem ----
@@ -145,20 +113,12 @@ func TestDownload_ChainPEM_LeafExcludesSelfAndRoot(t *testing.T) {
 	_, c, _, interID, leafID := downloadFixture(t)
 
 	w := c.get("/certs/" + leafID + "/chain.pem")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
 	blocks := decodePEMBlocks(t, w.Body.Bytes(), pemBlockCertificate)
-	if len(blocks) != 1 {
-		t.Fatalf("blocks: got %d, want 1 (intermediate only)", len(blocks))
-	}
+	require.Len(t, blocks, 1, "blocks (intermediate only)")
 	parsed, err := x509.ParseCertificate(blocks[0].Bytes)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if parsed.Subject.CommonName != "Revoke Intermediate" {
-		t.Errorf("chain[0] CN: got %q, want intermediate", parsed.Subject.CommonName)
-	}
+	require.NoError(t, err, "parse")
+	assert.Equal(t, "Revoke Intermediate", parsed.Subject.CommonName, "chain[0] CN")
 	_ = interID // already validated via CN
 }
 
@@ -166,20 +126,14 @@ func TestDownload_ChainPEM_IntermediateUnderRootIsEmpty(t *testing.T) {
 	_, c, _, interID, _ := downloadFixture(t)
 
 	w := c.get("/certs/" + interID + "/chain.pem")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d", w.Code)
-	}
-	if w.Body.Len() != 0 {
-		t.Errorf("intermediate-under-root chain should be empty PEM, got %d bytes", w.Body.Len())
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Zero(t, w.Body.Len(), "intermediate-under-root chain should be empty PEM")
 }
 
 func TestDownload_ChainPEM_RootIs404(t *testing.T) {
 	_, c, rootID, _, _ := downloadFixture(t)
 	w := c.get("/certs/" + rootID + "/chain.pem")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("root chain: got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code, "root chain")
 }
 
 // ---- fullchain.pem ----
@@ -188,30 +142,20 @@ func TestDownload_FullchainPEM_LeafIncludesSelfAndIntermediates(t *testing.T) {
 	_, c, _, _, leafID := downloadFixture(t)
 
 	w := c.get("/certs/" + leafID + "/fullchain.pem")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
 	blocks := decodePEMBlocks(t, w.Body.Bytes(), pemBlockCertificate)
-	if len(blocks) != 2 {
-		t.Fatalf("blocks: got %d, want 2 (leaf + intermediate)", len(blocks))
-	}
+	require.Len(t, blocks, 2, "blocks (leaf + intermediate)")
 	leaf, _ := x509.ParseCertificate(blocks[0].Bytes)
 	inter, _ := x509.ParseCertificate(blocks[1].Bytes)
-	if leaf.Subject.CommonName != "revoke.leaf.test" {
-		t.Errorf("block[0] CN: got %q", leaf.Subject.CommonName)
-	}
-	if inter.Subject.CommonName != "Revoke Intermediate" {
-		t.Errorf("block[1] CN: got %q", inter.Subject.CommonName)
-	}
+	assert.Equal(t, "revoke.leaf.test", leaf.Subject.CommonName, "block[0] CN")
+	assert.Equal(t, "Revoke Intermediate", inter.Subject.CommonName, "block[1] CN")
 }
 
 func TestDownload_FullchainPEM_NonLeafIs404(t *testing.T) {
 	_, c, rootID, interID, _ := downloadFixture(t)
 	for _, id := range []string{rootID, interID} {
 		w := c.get("/certs/" + id + "/fullchain.pem")
-		if w.Code != http.StatusNotFound {
-			t.Errorf("non-leaf %s fullchain: got %d, want 404", id, w.Code)
-		}
+		assert.Equal(t, http.StatusNotFound, w.Code, "non-leaf %s fullchain", id)
 	}
 }
 
@@ -221,46 +165,30 @@ func TestDownload_BundleP12_RoundTrip(t *testing.T) {
 	_, c, _, _, leafID := downloadFixture(t)
 
 	w := c.postForm("/certs/"+leafID+"/bundle.p12", url.Values{"password": {"hunter2"}})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d body=%q", w.Code, w.Body.String())
-	}
-	if ct := w.Header().Get("Content-Type"); ct != "application/x-pkcs12" {
-		t.Errorf("Content-Type: %q", ct)
-	}
-	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
-		t.Errorf("Cache-Control should be no-store: %q", cc)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/x-pkcs12", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Header().Get("Cache-Control"), "no-store", "Cache-Control should be no-store")
 
 	priv, leafCert, caCerts, err := pkcs12.DecodeChain(w.Body.Bytes(), "hunter2")
-	if err != nil {
-		t.Fatalf("DecodeChain: %v", err)
-	}
-	if _, ok := priv.(stdcrypto.Signer); !ok {
-		t.Errorf("decoded key %T is not a crypto.Signer", priv)
-	}
-	if leafCert.Subject.CommonName != "revoke.leaf.test" {
-		t.Errorf("leaf CN: %q", leafCert.Subject.CommonName)
-	}
-	if len(caCerts) != 1 || caCerts[0].Subject.CommonName != "Revoke Intermediate" {
-		t.Errorf("ca certs: got %v, want [Revoke Intermediate]", caCerts)
-	}
+	require.NoError(t, err, "DecodeChain")
+	_, ok := priv.(stdcrypto.Signer)
+	assert.True(t, ok, "decoded key %T is not a crypto.Signer", priv)
+	assert.Equal(t, "revoke.leaf.test", leafCert.Subject.CommonName, "leaf CN")
+	require.Len(t, caCerts, 1, "ca certs count")
+	assert.Equal(t, "Revoke Intermediate", caCerts[0].Subject.CommonName, "ca cert CN")
 }
 
 func TestDownload_BundleP12_MissingPassword(t *testing.T) {
 	_, c, _, _, leafID := downloadFixture(t)
 	w := c.postForm("/certs/"+leafID+"/bundle.p12", url.Values{})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestDownload_BundleP12_NonLeafIs404(t *testing.T) {
 	_, c, rootID, interID, _ := downloadFixture(t)
 	for _, id := range []string{rootID, interID} {
 		w := c.postForm("/certs/"+id+"/bundle.p12", url.Values{"password": {"hunter2"}})
-		if w.Code != http.StatusNotFound {
-			t.Errorf("non-leaf %s p12: got %d, want 404", id, w.Code)
-		}
+		assert.Equal(t, http.StatusNotFound, w.Code, "non-leaf %s p12", id)
 	}
 }
 
@@ -268,9 +196,8 @@ func TestDownload_BundleP12_RedirectsWhenLocked(t *testing.T) {
 	srv, c, _, _, leafID := downloadFixture(t)
 	srv.keystore.Lock()
 	w := c.postForm("/certs/"+leafID+"/bundle.p12", url.Values{"password": {"hunter2"}})
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 // ---- helpers under test ----
@@ -286,9 +213,7 @@ func TestSanitizeFilename(t *testing.T) {
 		{"héllo", "h_llo"},
 	}
 	for _, tc := range cases {
-		if got := sanitizeFilename(tc.in); got != tc.want {
-			t.Errorf("sanitizeFilename(%q) = %q, want %q", tc.in, got, tc.want)
-		}
+		assert.Equal(t, tc.want, sanitizeFilename(tc.in), "sanitizeFilename(%q)", tc.in)
 	}
 }
 
@@ -320,14 +245,10 @@ func TestCertDetail_RendersDownloadLinks(t *testing.T) {
 		w := c.get("/certs/" + tc.id)
 		body := w.Body.String()
 		for _, want := range tc.want {
-			if !strings.Contains(body, "/certs/"+tc.id+want) {
-				t.Errorf("/certs/%s detail missing link %s", tc.id, want)
-			}
+			assert.Contains(t, body, "/certs/"+tc.id+want, "/certs/%s detail missing link %s", tc.id, want)
 		}
 		for _, no := range tc.notWant {
-			if strings.Contains(body, "/certs/"+tc.id+no) {
-				t.Errorf("/certs/%s detail should not contain link %s", tc.id, no)
-			}
+			assert.NotContains(t, body, "/certs/"+tc.id+no, "/certs/%s detail should not contain link %s", tc.id, no)
 		}
 	}
 }

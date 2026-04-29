@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/Klice/homepki/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // settingsFixture issues a leaf chain so the rotation has DEKs to rewrap,
@@ -28,9 +30,7 @@ func TestSettings_GetRendersForm(t *testing.T) {
 	_ = srv
 
 	w := c.get("/settings")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code, "status body=%q", w.Body.String())
 	body := w.Body.String()
 	for _, want := range []string{
 		`name="current"`,
@@ -39,9 +39,7 @@ func TestSettings_GetRendersForm(t *testing.T) {
 		`name="form_token"`,
 		`action="/settings/passphrase"`,
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q", want)
-		}
+		assert.Contains(t, body, want)
 	}
 }
 
@@ -50,9 +48,8 @@ func TestSettings_GetRedirectsWhenLocked(t *testing.T) {
 	srv.keystore.Lock()
 
 	w := c.get("/settings")
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 func TestSettings_RotateHappyPath(t *testing.T) {
@@ -63,15 +60,11 @@ func TestSettings_RotateHappyPath(t *testing.T) {
 	// still succeed because the operator's session stays valid AND the
 	// rewrap is correct.
 	preWrap, err := store.GetCertKey(srv.db, leafID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	preCipher := append([]byte(nil), preWrap.Ciphertext...)
 
 	w := c.get("/settings")
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /settings: %d", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code, "GET /settings")
 	formTok := extractFormToken(t, w.Body.String())
 
 	const newPP = "new-passphrase-67890"
@@ -81,61 +74,40 @@ func TestSettings_RotateHappyPath(t *testing.T) {
 		"new2":       {newPP},
 		"form_token": {formTok},
 	})
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("rotate: %d body=%q", w.Code, w.Body.String())
-	}
-	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/settings") {
-		t.Errorf("Location: got %q", loc)
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "rotate body=%q", w.Body.String())
+	assert.True(t, strings.HasPrefix(w.Header().Get("Location"), "/settings"), "Location: got %q", w.Header().Get("Location"))
 
 	// 1. Keystore still unlocked, but with a new KEK — the operator who
 	//    rotated stays logged in (a fresh session cookie was set).
-	if !srv.keystore.IsUnlocked() {
-		t.Error("keystore should still be unlocked after rotation")
-	}
+	assert.True(t, srv.keystore.IsUnlocked(), "keystore should still be unlocked after rotation")
 
 	// 2. The leaf's wrapped_dek was rewrapped (different bytes) but the
 	//    inner ciphertext is unchanged.
 	postWrap, _ := store.GetCertKey(srv.db, leafID)
-	if string(postWrap.WrappedDEK) == string(preWrap.WrappedDEK) {
-		t.Error("wrapped_dek unchanged after rotation")
-	}
-	if string(postWrap.Ciphertext) != string(preCipher) {
-		t.Error("ciphertext changed (should be untouched)")
-	}
+	assert.NotEqual(t, string(preWrap.WrappedDEK), string(postWrap.WrappedDEK), "wrapped_dek unchanged after rotation")
+	assert.Equal(t, string(preCipher), string(postWrap.Ciphertext), "ciphertext changed (should be untouched)")
 
 	// 3. End-to-end: the key.pem download still decrypts and PEM-decodes.
 	w = c.get("/")
-	if w.Code != http.StatusOK {
-		t.Fatalf("post-rotate GET /: %d", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code, "post-rotate GET /")
 	w = c.get("/certs/" + leafID + "/key.pem")
-	if w.Code != http.StatusOK {
-		t.Fatalf("key.pem: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code, "key.pem body=%q", w.Body.String())
 	block, _ := pem.Decode(w.Body.Bytes())
-	if block == nil {
-		t.Fatal("key.pem did not PEM-decode after rotation")
-	}
-	if _, err := x509.ParsePKCS8PrivateKey(block.Bytes); err != nil {
-		t.Errorf("parse pkcs8 after rotation: %v", err)
-	}
+	require.NotNil(t, block, "key.pem did not PEM-decode after rotation")
+	_, err = x509.ParsePKCS8PrivateKey(block.Bytes)
+	assert.NoError(t, err, "parse pkcs8 after rotation")
 
 	// 4. Re-unlock with the NEW passphrase works; with the OLD one fails.
 	srv.keystore.Lock()
 	c2 := newClient(t, srv)
 	c2.get("/unlock") // CSRF cookie
 	w = c2.postForm("/unlock", url.Values{"passphrase": {newPP}})
-	if w.Code != http.StatusSeeOther {
-		t.Errorf("unlock with new passphrase: %d body=%q", w.Code, w.Body.String())
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code, "unlock with new passphrase: body=%q", w.Body.String())
 	srv.keystore.Lock()
 	c3 := newClient(t, srv)
 	c3.get("/unlock")
 	w = c3.postForm("/unlock", url.Values{"passphrase": {validPassphrase}})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("unlock with old passphrase: got %d, want 400", w.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code, "unlock with old passphrase")
 }
 
 func TestSettings_RotateRejectsWrongCurrent(t *testing.T) {
@@ -150,12 +122,8 @@ func TestSettings_RotateRejectsWrongCurrent(t *testing.T) {
 		"new2":       {"good-new-passphrase-12"},
 		"form_token": {formTok},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "incorrect") {
-		t.Errorf("expected 'incorrect' in body")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "incorrect", "expected 'incorrect' in body")
 }
 
 func TestSettings_RotateRejectsShortNew(t *testing.T) {
@@ -170,12 +138,8 @@ func TestSettings_RotateRejectsShortNew(t *testing.T) {
 		"new2":       {"short"},
 		"form_token": {formTok},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "at least 12 characters") {
-		t.Errorf("expected length error in body")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "at least 12 characters", "expected length error in body")
 }
 
 func TestSettings_RotateRejectsMismatchedNew(t *testing.T) {
@@ -190,12 +154,8 @@ func TestSettings_RotateRejectsMismatchedNew(t *testing.T) {
 		"new2":       {"good-new-passphrase-99"},
 		"form_token": {formTok},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "do not match") {
-		t.Errorf("expected mismatch error in body")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "do not match", "expected mismatch error in body")
 }
 
 func TestSettings_RotateStaleFormToken(t *testing.T) {
@@ -209,12 +169,8 @@ func TestSettings_RotateStaleFormToken(t *testing.T) {
 		"new2":       {"good-new-passphrase-12"},
 		"form_token": {"deadbeef-not-a-real-token"},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "stale form") {
-		t.Errorf("expected stale-form message")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "stale form", "expected stale-form message")
 }
 
 func TestSettings_RotateFormTokenReplay(t *testing.T) {
@@ -229,25 +185,17 @@ func TestSettings_RotateFormTokenReplay(t *testing.T) {
 		"form_token": {formTok},
 	}
 	w = c.postForm("/settings/passphrase", form)
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("first rotate: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "first rotate body=%q", w.Body.String())
 	first := w.Header().Get("Location")
 
 	// Replay: same form_token POSTed again. Per API.md §4.4 it should 303
 	// to /settings WITHOUT re-verifying current (which would now fail
 	// because the passphrase has changed).
 	w = c.postForm("/settings/passphrase", form)
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("replay: %d body=%q", w.Code, w.Body.String())
-	}
-	if w.Header().Get("Location") != first {
-		t.Errorf("replay Location: got %q, want %q", w.Header().Get("Location"), first)
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "replay body=%q", w.Body.String())
+	assert.Equal(t, first, w.Header().Get("Location"), "replay Location")
 	// Sanity: srv is still unlocked (replay didn't lock us out).
-	if !srv.keystore.IsUnlocked() {
-		t.Error("keystore should still be unlocked after replay")
-	}
+	assert.True(t, srv.keystore.IsUnlocked(), "keystore should still be unlocked after replay")
 }
 
 func TestSettings_RotateRollsBackOnFailure(t *testing.T) {
@@ -265,12 +213,8 @@ func TestSettings_RotateRollsBackOnFailure(t *testing.T) {
 		"new2":       {""},
 		"form_token": {formTok},
 	})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("got %d, want 400", w.Code)
-	}
-	if !srv.keystore.IsUnlocked() {
-		t.Error("keystore should remain unlocked after validation failure")
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.True(t, srv.keystore.IsUnlocked(), "keystore should remain unlocked after validation failure")
 }
 
 // Index page has a Settings link in the header.
@@ -279,10 +223,6 @@ func TestIndex_HasSettingsLink(t *testing.T) {
 	_ = srv
 
 	w := c.get("/")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), `href="/settings"`) {
-		t.Error("index header missing /settings link")
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `href="/settings"`, "index header missing /settings link")
 }

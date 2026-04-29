@@ -5,6 +5,9 @@ import (
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func fastBackoff() *unlockBackoff {
@@ -22,9 +25,7 @@ func TestUnlockBackoff_NoDelayBelowThreshold(t *testing.T) {
 	for range b.Threshold - 1 {
 		b.Failure()
 	}
-	if d := b.Delay(); d != 0 {
-		t.Errorf("delay below threshold: got %v, want 0", d)
-	}
+	assert.Equal(t, time.Duration(0), b.Delay(), "delay below threshold")
 }
 
 func TestUnlockBackoff_LinearAfterThreshold(t *testing.T) {
@@ -44,10 +45,7 @@ func TestUnlockBackoff_LinearAfterThreshold(t *testing.T) {
 		for range tc.failures {
 			b.Failure()
 		}
-		got := b.Delay()
-		if got != tc.want {
-			t.Errorf("%d failures: got %v, want %v", tc.failures, got, tc.want)
-		}
+		assert.Equal(t, tc.want, b.Delay(), "%d failures", tc.failures)
 	}
 }
 
@@ -56,9 +54,7 @@ func TestUnlockBackoff_CapsAtMax(t *testing.T) {
 	for range 100 {
 		b.Failure()
 	}
-	if d := b.Delay(); d != b.Max {
-		t.Errorf("got %v, want capped at %v", d, b.Max)
-	}
+	assert.Equal(t, b.Max, b.Delay(), "should be capped at max")
 }
 
 func TestUnlockBackoff_ResetClears(t *testing.T) {
@@ -66,13 +62,9 @@ func TestUnlockBackoff_ResetClears(t *testing.T) {
 	for range 10 {
 		b.Failure()
 	}
-	if b.Delay() == 0 {
-		t.Fatal("expected non-zero delay before reset")
-	}
+	require.NotEqual(t, time.Duration(0), b.Delay(), "expected non-zero delay before reset")
 	b.Reset()
-	if d := b.Delay(); d != 0 {
-		t.Errorf("after reset: got %v, want 0", d)
-	}
+	assert.Equal(t, time.Duration(0), b.Delay(), "after reset")
 }
 
 func TestUnlockBackoff_OldFailuresFallOutOfWindow(t *testing.T) {
@@ -86,14 +78,10 @@ func TestUnlockBackoff_OldFailuresFallOutOfWindow(t *testing.T) {
 	for range 6 {
 		b.Failure()
 	}
-	if b.Delay() == 0 {
-		t.Fatal("expected delay to be non-zero before time passes")
-	}
+	require.NotEqual(t, time.Duration(0), b.Delay(), "expected delay to be non-zero before time passes")
 	// Advance past the window — every failure now falls outside it.
 	now = past.Add(b.Window + time.Millisecond)
-	if d := b.Delay(); d != 0 {
-		t.Errorf("delay after window slid past: got %v, want 0", d)
-	}
+	assert.Equal(t, time.Duration(0), b.Delay(), "delay after window slid past")
 }
 
 // ============== integration with handleUnlockPost ==============
@@ -113,32 +101,20 @@ func TestUnlockHandler_BackoffEngagedAfterRepeatedFailures(t *testing.T) {
 	// Five wrong attempts — none should hit the backoff yet.
 	for range 5 {
 		w := c.postForm("/unlock", url.Values{"passphrase": {"wrong"}})
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("wrong attempt: got %d", w.Code)
-		}
+		require.Equal(t, http.StatusBadRequest, w.Code, "wrong attempt")
 	}
 
 	// Sixth wrong attempt — backoff fires; the response just takes longer.
 	start := time.Now()
 	w := c.postForm("/unlock", url.Values{"passphrase": {"wrong"}})
 	elapsed := time.Since(start)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status: %d", w.Code)
-	}
-	if elapsed < srv.backoff.Step {
-		t.Errorf("expected at least %v of backoff delay, got %v", srv.backoff.Step, elapsed)
-	}
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.GreaterOrEqual(t, elapsed, srv.backoff.Step, "expected at least %v of backoff delay", srv.backoff.Step)
 
 	// Correct passphrase still works (the backoff slows but doesn't reject).
 	w = c.postForm("/unlock", url.Values{"passphrase": {validPassphrase}})
-	if w.Code != http.StatusSeeOther {
-		t.Errorf("correct passphrase after backoff: got %d body=%q", w.Code, w.Body.String())
-	}
-	if !srv.keystore.IsUnlocked() {
-		t.Error("keystore should be unlocked after correct passphrase")
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code, "correct passphrase after backoff: body=%q", w.Body.String())
+	assert.True(t, srv.keystore.IsUnlocked(), "keystore should be unlocked after correct passphrase")
 	// Successful unlock clears the counter.
-	if d := srv.backoff.Delay(); d != 0 {
-		t.Errorf("backoff delay after success: got %v, want 0", d)
-	}
+	assert.Equal(t, time.Duration(0), srv.backoff.Delay(), "backoff delay after success")
 }

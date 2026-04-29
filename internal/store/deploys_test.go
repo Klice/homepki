@@ -1,9 +1,11 @@
 package store
 
 import (
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // seedLeaf inserts a parent + leaf so deploy_targets has a valid cert_id to
@@ -15,13 +17,9 @@ func seedLeaf(t *testing.T, db sqlcDBTX) string {
 	parent.ParentID = nil
 	parent.IsCA = true
 	parent.SubjectCN = "parent"
-	if err := insertCertTx(db, parent, sampleKey("parent-id")); err != nil {
-		t.Fatalf("insert parent: %v", err)
-	}
+	require.NoError(t, insertCertTx(db, parent, sampleKey("parent-id")), "insert parent")
 	leaf := sampleCert("leaf-id")
-	if err := insertCertTx(db, leaf, sampleKey("leaf-id")); err != nil {
-		t.Fatalf("insert leaf: %v", err)
-	}
+	require.NoError(t, insertCertTx(db, leaf, sampleKey("leaf-id")), "insert leaf")
 	return "leaf-id"
 }
 
@@ -46,105 +44,70 @@ func sampleTarget(id, certID string) *DeployTarget {
 
 func TestDeploys_InsertAndGet(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	leafID := seedLeaf(t, db)
 
 	in := sampleTarget("t1", leafID)
-	if err := InsertDeployTarget(db, in); err != nil {
-		t.Fatalf("InsertDeployTarget: %v", err)
-	}
+	require.NoError(t, InsertDeployTarget(db, in), "InsertDeployTarget")
 
 	got, err := GetDeployTarget(db, "t1")
-	if err != nil {
-		t.Fatalf("GetDeployTarget: %v", err)
-	}
+	require.NoError(t, err, "GetDeployTarget")
 	in.CreatedAt = got.CreatedAt
-	if got.Name != in.Name || got.CertPath != in.CertPath || got.AutoOnRotate != true {
-		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", got, in)
-	}
-	if got.ChainPath == nil || *got.ChainPath != "/etc/ssl/full.pem" {
-		t.Errorf("ChainPath: got %v", got.ChainPath)
-	}
-	if got.LastDeployedAt != nil {
-		t.Errorf("fresh target should have nil LastDeployedAt")
-	}
+	assert.Equal(t, in.Name, got.Name)
+	assert.Equal(t, in.CertPath, got.CertPath)
+	assert.True(t, got.AutoOnRotate)
+	require.NotNil(t, got.ChainPath)
+	assert.Equal(t, "/etc/ssl/full.pem", *got.ChainPath)
+	assert.Nil(t, got.LastDeployedAt, "fresh target should have nil LastDeployedAt")
 }
 
 func TestDeploys_GetMissing(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := GetDeployTarget(db, "nope"); !errors.Is(err, ErrDeployTargetNotFound) {
-		t.Errorf("got %v, want ErrDeployTargetNotFound", err)
-	}
+	require.NoError(t, Migrate(db))
+	_, err := GetDeployTarget(db, "nope")
+	assert.ErrorIs(t, err, ErrDeployTargetNotFound)
 }
 
 func TestDeploys_Update(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	leafID := seedLeaf(t, db)
-	if err := InsertDeployTarget(db, sampleTarget("t1", leafID)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, InsertDeployTarget(db, sampleTarget("t1", leafID)))
 	in := sampleTarget("t1", leafID)
 	in.Name = "haproxy"
 	in.AutoOnRotate = false
 	in.ChainPath = nil
-	if err := UpdateDeployTarget(db, in); err != nil {
-		t.Fatalf("UpdateDeployTarget: %v", err)
-	}
+	require.NoError(t, UpdateDeployTarget(db, in), "UpdateDeployTarget")
 	got, _ := GetDeployTarget(db, "t1")
-	if got.Name != "haproxy" || got.AutoOnRotate != false || got.ChainPath != nil {
-		t.Errorf("update did not stick: %+v", got)
-	}
+	assert.Equal(t, "haproxy", got.Name)
+	assert.False(t, got.AutoOnRotate)
+	assert.Nil(t, got.ChainPath)
 }
 
 func TestDeploys_Update_WrongCertIDIsNotFound(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	leafID := seedLeaf(t, db)
-	if err := InsertDeployTarget(db, sampleTarget("t1", leafID)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, InsertDeployTarget(db, sampleTarget("t1", leafID)))
 	in := sampleTarget("t1", "different-cert")
-	if err := UpdateDeployTarget(db, in); !errors.Is(err, ErrDeployTargetNotFound) {
-		t.Errorf("cross-cert update: got %v, want ErrDeployTargetNotFound", err)
-	}
+	assert.ErrorIs(t, UpdateDeployTarget(db, in), ErrDeployTargetNotFound, "cross-cert update")
 }
 
 func TestDeploys_DeleteIsIdempotent(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	leafID := seedLeaf(t, db)
-	if err := InsertDeployTarget(db, sampleTarget("t1", leafID)); err != nil {
-		t.Fatal(err)
-	}
-	if err := DeleteDeployTarget(db, "t1", leafID); err != nil {
-		t.Fatalf("first delete: %v", err)
-	}
+	require.NoError(t, InsertDeployTarget(db, sampleTarget("t1", leafID)))
+	require.NoError(t, DeleteDeployTarget(db, "t1", leafID), "first delete")
 	// Second delete on the same id is a no-op (per API.md §8.2).
-	if err := DeleteDeployTarget(db, "t1", leafID); err != nil {
-		t.Errorf("replay delete: got %v, want nil", err)
-	}
-	if _, err := GetDeployTarget(db, "t1"); !errors.Is(err, ErrDeployTargetNotFound) {
-		t.Errorf("after delete: got %v, want ErrDeployTargetNotFound", err)
-	}
+	assert.NoError(t, DeleteDeployTarget(db, "t1", leafID), "replay delete")
+	_, err := GetDeployTarget(db, "t1")
+	assert.ErrorIs(t, err, ErrDeployTargetNotFound, "after delete")
 }
 
 func TestDeploys_List_OrderingAndCertScope(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	leafID := seedLeaf(t, db)
 
 	a := sampleTarget("ta", leafID)
@@ -153,144 +116,94 @@ func TestDeploys_List_OrderingAndCertScope(t *testing.T) {
 	b.Name = "bravo"
 	c := sampleTarget("tc", leafID)
 	c.Name = "alpha" // duplicate name on same cert → unique violation
-	if err := InsertDeployTarget(db, a); err != nil {
-		t.Fatal(err)
-	}
-	if err := InsertDeployTarget(db, b); err != nil {
-		t.Fatal(err)
-	}
-	if err := InsertDeployTarget(db, c); err == nil {
-		t.Errorf("duplicate (cert_id, name) should violate UNIQUE")
-	}
+	require.NoError(t, InsertDeployTarget(db, a))
+	require.NoError(t, InsertDeployTarget(db, b))
+	assert.Error(t, InsertDeployTarget(db, c), "duplicate (cert_id, name) should violate UNIQUE")
 
 	got, err := ListDeployTargets(db, leafID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("len: got %d, want 2", len(got))
-	}
-	if got[0].Name != "alpha" || got[1].Name != "bravo" {
-		t.Errorf("order: got %s, %s", got[0].Name, got[1].Name)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "alpha", got[0].Name)
+	assert.Equal(t, "bravo", got[1].Name)
 
 	// Scoping: a different cert returns nothing.
 	other, err := ListDeployTargets(db, "no-such")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(other) != 0 {
-		t.Errorf("other cert: got %d, want 0", len(other))
-	}
+	require.NoError(t, err)
+	assert.Empty(t, other)
 }
 
 func TestDeploys_RecordRun_OKAndFailed(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	leafID := seedLeaf(t, db)
-	if err := InsertDeployTarget(db, sampleTarget("t1", leafID)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, InsertDeployTarget(db, sampleTarget("t1", leafID)))
 
 	when := time.Date(2026, 4, 28, 10, 0, 0, 0, time.UTC)
-	if err := RecordDeployRun(db, "t1", DeployStatusOK, "01ab", "", when); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, RecordDeployRun(db, "t1", DeployStatusOK, "01ab", "", when))
 	got, _ := GetDeployTarget(db, "t1")
-	if got.LastStatus == nil || *got.LastStatus != "ok" {
-		t.Errorf("LastStatus: %v", got.LastStatus)
-	}
-	if got.LastDeployedSerial == nil || *got.LastDeployedSerial != "01ab" {
-		t.Errorf("LastDeployedSerial: %v", got.LastDeployedSerial)
-	}
-	if got.LastError != nil {
-		t.Errorf("LastError after ok run: got %v, want nil", got.LastError)
-	}
-	if got.LastDeployedAt == nil || !got.LastDeployedAt.Equal(when) {
-		t.Errorf("LastDeployedAt: %v", got.LastDeployedAt)
-	}
+	require.NotNil(t, got.LastStatus)
+	assert.Equal(t, "ok", *got.LastStatus)
+	require.NotNil(t, got.LastDeployedSerial)
+	assert.Equal(t, "01ab", *got.LastDeployedSerial)
+	assert.Nil(t, got.LastError, "LastError after ok run")
+	require.NotNil(t, got.LastDeployedAt)
+	assert.True(t, got.LastDeployedAt.Equal(when), "LastDeployedAt: %v", got.LastDeployedAt)
 
 	// Failed run records the error and overwrites the previous status.
-	if err := RecordDeployRun(db, "t1", DeployStatusFailed, "01ab", "boom", when.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, RecordDeployRun(db, "t1", DeployStatusFailed, "01ab", "boom", when.Add(time.Hour)))
 	got, _ = GetDeployTarget(db, "t1")
-	if *got.LastStatus != "failed" || *got.LastError != "boom" {
-		t.Errorf("after failed run: status=%v error=%v", got.LastStatus, got.LastError)
-	}
+	require.NotNil(t, got.LastStatus)
+	assert.Equal(t, "failed", *got.LastStatus)
+	require.NotNil(t, got.LastError)
+	assert.Equal(t, "boom", *got.LastError)
 }
 
 func TestDeploys_RecordRun_RejectsBadStatus(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	leafID := seedLeaf(t, db)
-	if err := InsertDeployTarget(db, sampleTarget("t1", leafID)); err != nil {
-		t.Fatal(err)
-	}
-	if err := RecordDeployRun(db, "t1", DeployStatus("stale"), "", "", time.Now()); err == nil {
-		t.Error("expected error for status=stale (UI-derived only per STORAGE.md §5.6)")
-	}
+	require.NoError(t, InsertDeployTarget(db, sampleTarget("t1", leafID)))
+	assert.Error(t, RecordDeployRun(db, "t1", DeployStatus("stale"), "", "", time.Now()),
+		"expected error for status=stale (UI-derived only per STORAGE.md §5.6)")
 }
 
 func TestDeploys_RecordRun_MissingTarget(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if err := RecordDeployRun(db, "no-such", DeployStatusOK, "01", "", time.Now()); !errors.Is(err, ErrDeployTargetNotFound) {
-		t.Errorf("got %v, want ErrDeployTargetNotFound", err)
-	}
+	require.NoError(t, Migrate(db))
+	err := RecordDeployRun(db, "no-such", DeployStatusOK, "01", "", time.Now())
+	assert.ErrorIs(t, err, ErrDeployTargetNotFound)
 }
 
 func TestDeploys_CreateWithToken_AtomicAndReplay(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	leafID := seedLeaf(t, db)
 	tok, _ := CreateIdemToken(db)
 	resultURL := "/certs/" + leafID
 
-	if err := CreateDeployTargetWithToken(db, sampleTarget("t1", leafID), tok, resultURL); err != nil {
-		t.Fatalf("first create: %v", err)
-	}
+	require.NoError(t, CreateDeployTargetWithToken(db, sampleTarget("t1", leafID), tok, resultURL), "first create")
 	row, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if row.ResultURL == nil || *row.ResultURL != resultURL {
-		t.Errorf("token result_url: got %v, want %s", row.ResultURL, resultURL)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, row.ResultURL)
+	assert.Equal(t, resultURL, *row.ResultURL)
 
 	// Replay path: caller never reaches CreateDeployTargetWithToken — they
 	// see a populated ResultURL on lookup and 303 to it. Sanity check that
 	// re-running the combinator now would error (the unique index protects
 	// against an out-of-band double-insert).
 	err = CreateDeployTargetWithToken(db, sampleTarget("t1-other-id", leafID), tok, resultURL)
-	if err == nil {
-		t.Error("re-running combinator on a used token should fail (token already used)")
-	}
+	assert.Error(t, err, "re-running combinator on a used token should fail")
 }
 
 func TestDeploys_FKCascadeOnCertDelete(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	leafID := seedLeaf(t, db)
-	if err := InsertDeployTarget(db, sampleTarget("t1", leafID)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, InsertDeployTarget(db, sampleTarget("t1", leafID)))
 	// Hard-delete the cert and confirm the target row vanishes via the
 	// schema-declared ON DELETE CASCADE.
-	if _, err := db.Exec("DELETE FROM certificates WHERE id = ?", leafID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := GetDeployTarget(db, "t1"); !errors.Is(err, ErrDeployTargetNotFound) {
-		t.Errorf("after cert delete: got %v, want ErrDeployTargetNotFound", err)
-	}
+	_, err := db.Exec("DELETE FROM certificates WHERE id = ?", leafID)
+	require.NoError(t, err)
+	_, err = GetDeployTarget(db, "t1")
+	assert.ErrorIs(t, err, ErrDeployTargetNotFound, "after cert delete")
 }

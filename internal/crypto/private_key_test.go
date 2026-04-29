@@ -3,8 +3,10 @@ package crypto
 import (
 	"bytes"
 	"crypto/rand"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSealPrivateKey_RoundTrip(t *testing.T) {
@@ -14,23 +16,14 @@ func TestSealPrivateKey_RoundTrip(t *testing.T) {
 	certID := "11111111-1111-1111-1111-111111111111"
 
 	sealed, err := SealPrivateKey(kek, certID, plaintext)
-	if err != nil {
-		t.Fatalf("Seal: %v", err)
-	}
-	if len(sealed.DEKNonce) != NonceLen || len(sealed.CipherNonce) != NonceLen {
-		t.Errorf("nonce lengths: dek=%d cipher=%d", len(sealed.DEKNonce), len(sealed.CipherNonce))
-	}
-	if bytes.Equal(sealed.Ciphertext, plaintext) {
-		t.Error("ciphertext equals plaintext")
-	}
+	require.NoError(t, err, "Seal")
+	assert.Equal(t, NonceLen, len(sealed.DEKNonce), "DEKNonce length")
+	assert.Equal(t, NonceLen, len(sealed.CipherNonce), "CipherNonce length")
+	assert.False(t, bytes.Equal(sealed.Ciphertext, plaintext), "ciphertext equals plaintext")
 
 	got, err := OpenPrivateKey(kek, certID, sealed)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if !bytes.Equal(got, plaintext) {
-		t.Errorf("round-trip mismatch:\n  got %x\n want %x", got, plaintext)
-	}
+	require.NoError(t, err, "Open")
+	assert.Equal(t, plaintext, got)
 }
 
 func TestSealPrivateKey_AADBoundToCertID(t *testing.T) {
@@ -39,15 +32,12 @@ func TestSealPrivateKey_AADBoundToCertID(t *testing.T) {
 	plaintext := []byte("secret key bytes")
 
 	sealed, err := SealPrivateKey(kek, "cert-A", plaintext)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	// Attempting to open with a different cert ID must fail — that's the
 	// whole point of binding the AAD: an attacker who can swap rows in the
 	// DB can't trick us into using one cert's key under another cert's id.
-	if _, err := OpenPrivateKey(kek, "cert-B", sealed); err == nil {
-		t.Error("Open with wrong certID should fail, got nil")
-	}
+	_, err = OpenPrivateKey(kek, "cert-B", sealed)
+	assert.Error(t, err, "Open with wrong certID should fail")
 }
 
 func TestSealPrivateKey_DifferentKEKDifferentCiphertext(t *testing.T) {
@@ -60,20 +50,12 @@ func TestSealPrivateKey_DifferentKEKDifferentCiphertext(t *testing.T) {
 	rand.Read(kek2)
 
 	a, err := SealPrivateKey(kek1, certID, plaintext)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	b, err := SealPrivateKey(kek2, certID, plaintext)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Equal(a.WrappedDEK, b.WrappedDEK) {
-		t.Error("different KEKs produced identical wrapped DEKs")
-	}
+	require.NoError(t, err)
+	assert.False(t, bytes.Equal(a.WrappedDEK, b.WrappedDEK), "different KEKs produced identical wrapped DEKs")
 	// Inner ciphertext also differs because each call generates a fresh DEK.
-	if bytes.Equal(a.Ciphertext, b.Ciphertext) {
-		t.Error("different KEKs produced identical ciphertexts (DEK reuse?)")
-	}
+	assert.False(t, bytes.Equal(a.Ciphertext, b.Ciphertext), "different KEKs produced identical ciphertexts (DEK reuse?)")
 }
 
 func TestSealPrivateKey_RejectsBadInputs(t *testing.T) {
@@ -92,9 +74,8 @@ func TestSealPrivateKey_RejectsBadInputs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := SealPrivateKey(tc.kek, tc.certID, plaintext)
-			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
-				t.Errorf("got %v, want error containing %q", err, tc.wantSub)
-			}
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tc.wantSub)
 		})
 	}
 }
@@ -103,24 +84,20 @@ func TestOpenPrivateKey_RejectsTampering(t *testing.T) {
 	kek := make([]byte, KeyLen)
 	rand.Read(kek)
 	sealed, err := SealPrivateKey(kek, "id", []byte("secret"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	t.Run("flipped ciphertext byte", func(t *testing.T) {
 		bad := *sealed
 		bad.Ciphertext = append([]byte(nil), sealed.Ciphertext...)
 		bad.Ciphertext[0] ^= 0x01
-		if _, err := OpenPrivateKey(kek, "id", &bad); err == nil {
-			t.Error("expected error, got nil")
-		}
+		_, err := OpenPrivateKey(kek, "id", &bad)
+		assert.Error(t, err)
 	})
 	t.Run("flipped wrapped dek byte", func(t *testing.T) {
 		bad := *sealed
 		bad.WrappedDEK = append([]byte(nil), sealed.WrappedDEK...)
 		bad.WrappedDEK[0] ^= 0x01
-		if _, err := OpenPrivateKey(kek, "id", &bad); err == nil {
-			t.Error("expected error, got nil")
-		}
+		_, err := OpenPrivateKey(kek, "id", &bad)
+		assert.Error(t, err)
 	})
 }

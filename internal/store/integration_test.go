@@ -6,7 +6,6 @@ package store_test
 // through "retrieve + decrypt" and verifies the chain end to end.
 
 import (
-	"bytes"
 	stdcrypto "crypto"
 	"crypto/rand"
 	"crypto/sha256"
@@ -14,13 +13,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"net"
-	"reflect"
 	"testing"
 	"time"
 
 	"github.com/Klice/homepki/internal/crypto"
 	"github.com/Klice/homepki/internal/pki"
 	"github.com/Klice/homepki/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIntegration_IssueEncryptStoreRetrieveDecryptVerify(t *testing.T) {
@@ -28,9 +28,8 @@ func TestIntegration_IssueEncryptStoreRetrieveDecryptVerify(t *testing.T) {
 
 	// One KEK shared across the test, mimicking the unlocked keystore.
 	kek := make([]byte, crypto.KeyLen)
-	if _, err := rand.Read(kek); err != nil {
-		t.Fatal(err)
-	}
+	_, err := rand.Read(kek)
+	require.NoError(t, err)
 
 	// 1. Issue a self-signed root.
 	rootIssued, err := pki.IssueRoot(pki.RootRequest{
@@ -38,13 +37,9 @@ func TestIntegration_IssueEncryptStoreRetrieveDecryptVerify(t *testing.T) {
 		Key:      pki.KeySpec{Algo: pki.ECDSA, Params: "P-256"},
 		Validity: 10 * 365 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("IssueRoot: %v", err)
-	}
+	require.NoError(t, err, "IssueRoot")
 	rootID := "11111111-1111-1111-1111-111111111111"
-	if err := persist(t, db, kek, rootIssued, "root_ca", rootID, nil); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, persist(t, db, kek, rootIssued, "root_ca", rootID, nil))
 
 	// 2. Issue an intermediate signed by the root.
 	intermediateIssued, err := pki.IssueIntermediate(pki.IntermediateRequest{
@@ -55,13 +50,9 @@ func TestIntegration_IssueEncryptStoreRetrieveDecryptVerify(t *testing.T) {
 		CRLBaseURL: "https://certs.lan",
 		Validity:   5 * 365 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("IssueIntermediate: %v", err)
-	}
+	require.NoError(t, err, "IssueIntermediate")
 	intID := "22222222-2222-2222-2222-222222222222"
-	if err := persist(t, db, kek, intermediateIssued, "intermediate_ca", intID, &rootID); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, persist(t, db, kek, intermediateIssued, "intermediate_ca", intID, &rootID))
 
 	// 3. Issue a leaf signed by the intermediate.
 	leafIssued, err := pki.IssueLeaf(pki.LeafRequest{
@@ -74,28 +65,18 @@ func TestIntegration_IssueEncryptStoreRetrieveDecryptVerify(t *testing.T) {
 		SANIPs:     []net.IP{net.ParseIP("10.0.0.1")},
 		Validity:   90 * 24 * time.Hour,
 	})
-	if err != nil {
-		t.Fatalf("IssueLeaf: %v", err)
-	}
+	require.NoError(t, err, "IssueLeaf")
 	leafID := "33333333-3333-3333-3333-333333333333"
-	if err := persist(t, db, kek, leafIssued, "leaf", leafID, &intID); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, persist(t, db, kek, leafIssued, "leaf", leafID, &intID))
 
 	// 4. Reload the leaf cert and key from the DB.
 	got, err := store.GetCert(db, leafID)
-	if err != nil {
-		t.Fatalf("GetCert: %v", err)
-	}
+	require.NoError(t, err, "GetCert")
 	gotKey, err := store.GetCertKey(db, leafID)
-	if err != nil {
-		t.Fatalf("GetCertKey: %v", err)
-	}
+	require.NoError(t, err, "GetCertKey")
 
 	// Cert DER should round-trip exactly.
-	if !bytes.Equal(got.DERCert, leafIssued.DER) {
-		t.Errorf("DER mismatch on leaf round-trip")
-	}
+	assert.Equal(t, leafIssued.DER, got.DERCert, "DER mismatch on leaf round-trip")
 
 	// 5. Decrypt the leaf's private key and verify it matches the public
 	// key in the cert (proves the encrypted material is the right key).
@@ -105,56 +86,38 @@ func TestIntegration_IssueEncryptStoreRetrieveDecryptVerify(t *testing.T) {
 		CipherNonce: gotKey.CipherNonce,
 		Ciphertext:  gotKey.Ciphertext,
 	})
-	if err != nil {
-		t.Fatalf("OpenPrivateKey: %v", err)
-	}
+	require.NoError(t, err, "OpenPrivateKey")
 	defer crypto.Zero(pkcs8)
 	priv, err := x509.ParsePKCS8PrivateKey(pkcs8)
-	if err != nil {
-		t.Fatalf("ParsePKCS8PrivateKey: %v", err)
-	}
+	require.NoError(t, err, "ParsePKCS8PrivateKey")
 	signer, ok := priv.(stdcrypto.Signer)
-	if !ok {
-		t.Fatalf("decrypted key %T does not implement crypto.Signer", priv)
-	}
-	if !reflect.DeepEqual(signer.Public(), leafIssued.Cert.PublicKey) {
-		t.Errorf("decrypted private key does not match cert public key")
-	}
+	require.True(t, ok, "decrypted key %T does not implement crypto.Signer", priv)
+	assert.Equal(t, leafIssued.Cert.PublicKey, signer.Public(),
+		"decrypted private key does not match cert public key")
 
 	// 6. Build a trust pool from the persisted root + intermediate, then
 	// verify the persisted leaf chains correctly.
 	rootGot, err := store.GetCert(db, rootID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	intGot, err := store.GetCert(db, intID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	rootCert, err := x509.ParseCertificate(rootGot.DERCert)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	intCert, err := x509.ParseCertificate(intGot.DERCert)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	leafCert, err := x509.ParseCertificate(got.DERCert)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	pool := x509.NewCertPool()
 	pool.AddCert(rootCert)
 	intermediates := x509.NewCertPool()
 	intermediates.AddCert(intCert)
-	if _, err := leafCert.Verify(x509.VerifyOptions{
+	_, err = leafCert.Verify(x509.VerifyOptions{
 		Roots:         pool,
 		Intermediates: intermediates,
 		DNSName:       "leaf.test",
-	}); err != nil {
-		t.Fatalf("Verify after round-trip: %v", err)
-	}
+	})
+	require.NoError(t, err, "Verify after round-trip")
 }
 
 // persist marshals issued.Key as PKCS#8, seals it under kek with the
@@ -221,12 +184,8 @@ func keyAlgoFromCert(c *x509.Certificate) string {
 func openDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	require.NoError(t, err, "Open")
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	require.NoError(t, store.Migrate(db), "Migrate")
 	return db
 }

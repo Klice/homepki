@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestStaticHandler_ServesPicoCSS(t *testing.T) {
@@ -14,18 +16,11 @@ func TestStaticHandler_ServesPicoCSS(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status: got %d, want 200", w.Code)
-	}
-	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
-		t.Errorf("Content-Type: got %q, want text/css", ct)
-	}
-	if cc := w.Header().Get("Cache-Control"); cc != "public, max-age=300" {
-		t.Errorf("Cache-Control: got %q", cc)
-	}
-	if !strings.Contains(w.Body.String(), "@charset") {
-		t.Error("response body does not look like the vendored pico.css")
-	}
+	assert.Equal(t, http.StatusOK, w.Code, "status")
+	ct := w.Header().Get("Content-Type")
+	assert.True(t, strings.HasPrefix(ct, "text/css"), "Content-Type: got %q, want text/css", ct)
+	assert.Equal(t, "public, max-age=300", w.Header().Get("Cache-Control"))
+	assert.Contains(t, w.Body.String(), "@charset", "response body does not look like the vendored pico.css")
 }
 
 func TestStaticHandler_ServesHtmx(t *testing.T) {
@@ -35,13 +30,11 @@ func TestStaticHandler_ServesHtmx(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status: got %d, want 200", w.Code)
-	}
-	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") &&
-		!strings.HasPrefix(ct, "application/javascript") {
-		t.Errorf("Content-Type: got %q, want a JS type", ct)
-	}
+	assert.Equal(t, http.StatusOK, w.Code, "status")
+	ct := w.Header().Get("Content-Type")
+	assert.True(t,
+		strings.HasPrefix(ct, "text/javascript") || strings.HasPrefix(ct, "application/javascript"),
+		"Content-Type: got %q, want a JS type", ct)
 }
 
 func TestStaticHandler_ServesHomepkiCSS(t *testing.T) {
@@ -51,9 +44,7 @@ func TestStaticHandler_ServesHomepkiCSS(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status: got %d, want 200", w.Code)
-	}
+	assert.Equal(t, http.StatusOK, w.Code, "status")
 }
 
 func TestStaticHandler_404OnMissing(t *testing.T) {
@@ -63,7 +54,5 @@ func TestStaticHandler_404OnMissing(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status: got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code, "status")
 }

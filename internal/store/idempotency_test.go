@@ -1,137 +1,89 @@
 package store
 
 import (
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateAndLookup_RoundTrip(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatalf("CreateIdemToken: %v", err)
-	}
-	if len(tok) != 64 {
-		t.Errorf("token length: got %d, want 64 (32 bytes hex)", len(tok))
-	}
+	require.NoError(t, err, "CreateIdemToken")
+	assert.Len(t, tok, 64, "token length: want 64 (32 bytes hex)")
 
 	got, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatalf("LookupIdemToken: %v", err)
-	}
-	if got.Token != tok {
-		t.Errorf("token mismatch: got %q, want %q", got.Token, tok)
-	}
-	if got.UsedAt != nil {
-		t.Errorf("fresh token should have nil UsedAt, got %v", *got.UsedAt)
-	}
-	if got.ResultURL != nil {
-		t.Errorf("fresh token should have nil ResultURL, got %q", *got.ResultURL)
-	}
-	if !got.ExpiresAt.After(got.CreatedAt) {
-		t.Errorf("ExpiresAt %v should be after CreatedAt %v", got.ExpiresAt, got.CreatedAt)
-	}
+	require.NoError(t, err, "LookupIdemToken")
+	assert.Equal(t, tok, got.Token)
+	assert.Nil(t, got.UsedAt, "fresh token should have nil UsedAt")
+	assert.Nil(t, got.ResultURL, "fresh token should have nil ResultURL")
+	assert.True(t, got.ExpiresAt.After(got.CreatedAt),
+		"ExpiresAt %v should be after CreatedAt %v", got.ExpiresAt, got.CreatedAt)
 }
 
 func TestCreateUniqueness(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	a, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	b, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a == b {
-		t.Error("two consecutive CreateIdemToken calls returned the same token")
-	}
+	require.NoError(t, err)
+	assert.NotEqual(t, a, b, "two consecutive CreateIdemToken calls returned the same token")
 }
 
 func TestLookup_MissingReturnsSentinel(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LookupIdemToken(db, "no-such-token"); !errors.Is(err, ErrIdemTokenNotFound) {
-		t.Errorf("got %v, want ErrIdemTokenNotFound", err)
-	}
-	if _, err := LookupIdemToken(db, ""); !errors.Is(err, ErrIdemTokenNotFound) {
-		t.Errorf("empty token: got %v, want ErrIdemTokenNotFound", err)
-	}
+	require.NoError(t, Migrate(db))
+	_, err := LookupIdemToken(db, "no-such-token")
+	assert.ErrorIs(t, err, ErrIdemTokenNotFound)
+	_, err = LookupIdemToken(db, "")
+	assert.ErrorIs(t, err, ErrIdemTokenNotFound, "empty token")
 }
 
 func TestMarkUsed_RoundTripAndIdempotency(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	if err := MarkIdemTokenUsed(db, tok, "/certs/abc"); err != nil {
-		t.Fatalf("MarkIdemTokenUsed: %v", err)
-	}
+	require.NoError(t, MarkIdemTokenUsed(db, tok, "/certs/abc"), "MarkIdemTokenUsed")
 
 	got, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.UsedAt == nil {
-		t.Error("UsedAt should be set after MarkIdemTokenUsed")
-	}
-	if got.ResultURL == nil || *got.ResultURL != "/certs/abc" {
-		t.Errorf("ResultURL: got %v, want '/certs/abc'", got.ResultURL)
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, got.UsedAt, "UsedAt should be set after MarkIdemTokenUsed")
+	require.NotNil(t, got.ResultURL)
+	assert.Equal(t, "/certs/abc", *got.ResultURL)
 
 	// A second mark on the same token must fail — the WHERE clause
 	// "used_at IS NULL" filters it out, so RowsAffected = 0.
-	if err := MarkIdemTokenUsed(db, tok, "/somewhere/else"); !errors.Is(err, ErrIdemTokenNotFound) {
-		t.Errorf("second mark: got %v, want ErrIdemTokenNotFound", err)
-	}
+	err = MarkIdemTokenUsed(db, tok, "/somewhere/else")
+	assert.ErrorIs(t, err, ErrIdemTokenNotFound, "second mark")
 
 	// And the original ResultURL is preserved.
 	got, err = LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.ResultURL == nil || *got.ResultURL != "/certs/abc" {
-		t.Errorf("after second mark, ResultURL was overwritten: got %v", got.ResultURL)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, got.ResultURL)
+	assert.Equal(t, "/certs/abc", *got.ResultURL, "after second mark, ResultURL was overwritten")
 }
 
 func TestMarkUsed_UnknownToken(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if err := MarkIdemTokenUsed(db, "no-such", "/x"); !errors.Is(err, ErrIdemTokenNotFound) {
-		t.Errorf("got %v, want ErrIdemTokenNotFound", err)
-	}
-	if err := MarkIdemTokenUsed(db, "", "/x"); !errors.Is(err, ErrIdemTokenNotFound) {
-		t.Errorf("empty token: got %v, want ErrIdemTokenNotFound", err)
-	}
+	require.NoError(t, Migrate(db))
+	err := MarkIdemTokenUsed(db, "no-such", "/x")
+	assert.ErrorIs(t, err, ErrIdemTokenNotFound)
+	err = MarkIdemTokenUsed(db, "", "/x")
+	assert.ErrorIs(t, err, ErrIdemTokenNotFound, "empty token")
 }
 
 func TestIssueCertWithToken_AtomicSuccess(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	c := sampleCert("issued-id")
 	c.Type = "root_ca"
@@ -139,69 +91,47 @@ func TestIssueCertWithToken_AtomicSuccess(t *testing.T) {
 	c.ParentID = nil
 	k := sampleKey("issued-id")
 
-	if err := IssueCertWithToken(db, c, k, nil, tok, "/certs/issued-id"); err != nil {
-		t.Fatalf("IssueCertWithToken: %v", err)
-	}
+	require.NoError(t, IssueCertWithToken(db, c, k, nil, tok, "/certs/issued-id"), "IssueCertWithToken")
 
 	// Cert and key both written.
-	if _, err := GetCert(db, "issued-id"); err != nil {
-		t.Errorf("cert row missing: %v", err)
-	}
-	if _, err := GetCertKey(db, "issued-id"); err != nil {
-		t.Errorf("key row missing: %v", err)
-	}
+	_, err = GetCert(db, "issued-id")
+	assert.NoError(t, err, "cert row missing")
+	_, err = GetCertKey(db, "issued-id")
+	assert.NoError(t, err, "key row missing")
 	// Token marked used.
 	row, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if row.UsedAt == nil || row.ResultURL == nil || *row.ResultURL != "/certs/issued-id" {
-		t.Errorf("token not marked: %+v", row)
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, row.UsedAt)
+	require.NotNil(t, row.ResultURL)
+	assert.Equal(t, "/certs/issued-id", *row.ResultURL)
 }
 
 func TestIssueCertWithToken_RollsBackOnFKViolation(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	// Bad parent_id triggers FK violation inside insertCertTx.
 	c := sampleCert("orphan")
 	c.ParentID = ptrStr("does-not-exist")
 	k := sampleKey("orphan")
 
-	if err := IssueCertWithToken(db, c, k, nil, tok, "/x"); err == nil {
-		t.Error("expected FK violation error, got nil")
-	}
+	assert.Error(t, IssueCertWithToken(db, c, k, nil, tok, "/x"), "expected FK violation error")
 	// All three rows must be absent.
-	if _, err := GetCert(db, "orphan"); !errors.Is(err, ErrCertNotFound) {
-		t.Error("cert row should not have been written")
-	}
-	if _, err := GetCertKey(db, "orphan"); !errors.Is(err, ErrCertNotFound) {
-		t.Error("key row should not have been written")
-	}
+	_, err = GetCert(db, "orphan")
+	assert.ErrorIs(t, err, ErrCertNotFound, "cert row should not have been written")
+	_, err = GetCertKey(db, "orphan")
+	assert.ErrorIs(t, err, ErrCertNotFound, "key row should not have been written")
 	row, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if row.UsedAt != nil {
-		t.Error("token should not have been marked used after rollback")
-	}
+	require.NoError(t, err)
+	assert.Nil(t, row.UsedAt, "token should not have been marked used after rollback")
 }
 
 func TestIssueCertWithToken_WithInitialCRL(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	c := sampleCert("ca-id")
 	c.Type = "root_ca"
@@ -218,41 +148,27 @@ func TestIssueCertWithToken_WithInitialCRL(t *testing.T) {
 		DER:          []byte{0xCA, 0xFE},
 	}
 
-	if err := IssueCertWithToken(db, c, k, crl, tok, "/certs/ca-id"); err != nil {
-		t.Fatalf("IssueCertWithToken: %v", err)
-	}
+	require.NoError(t, IssueCertWithToken(db, c, k, crl, tok, "/certs/ca-id"), "IssueCertWithToken")
 
 	// All four states must be visible after commit.
-	if _, err := GetCert(db, "ca-id"); err != nil {
-		t.Errorf("cert row missing: %v", err)
-	}
-	if _, err := GetCertKey(db, "ca-id"); err != nil {
-		t.Errorf("key row missing: %v", err)
-	}
+	_, err = GetCert(db, "ca-id")
+	assert.NoError(t, err, "cert row missing")
+	_, err = GetCertKey(db, "ca-id")
+	assert.NoError(t, err, "key row missing")
 	got, err := GetLatestCRL(db, "ca-id")
-	if err != nil {
-		t.Errorf("crl row missing: %v", err)
-	} else if got.CRLNumber != 1 {
-		t.Errorf("crl number: got %d, want 1", got.CRLNumber)
+	if assert.NoError(t, err, "crl row missing") {
+		assert.Equal(t, int64(1), got.CRLNumber)
 	}
 	row, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if row.UsedAt == nil {
-		t.Error("token should have been marked used")
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, row.UsedAt, "token should have been marked used")
 }
 
 func TestIssueCertWithToken_InitialCRLRollsBackOnFailure(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Mismatched issuer_cert_id will fail the FK on crls.issuer_cert_id
 	// when the cert hasn't been inserted under that id.
@@ -267,32 +183,22 @@ func TestIssueCertWithToken_InitialCRLRollsBackOnFailure(t *testing.T) {
 		NextUpdate:   time.Now().Add(time.Hour),
 		DER:          []byte{0x00},
 	}
-	if err := IssueCertWithToken(db, c, sampleKey("real-ca"), crl, tok, "/x"); err == nil {
-		t.Fatal("expected FK violation, got nil")
-	}
+	require.Error(t, IssueCertWithToken(db, c, sampleKey("real-ca"), crl, tok, "/x"),
+		"expected FK violation")
 	// Cert, key, and token must all be in their pre-call state.
-	if _, err := GetCert(db, "real-ca"); !errors.Is(err, ErrCertNotFound) {
-		t.Error("cert row should not have been written")
-	}
+	_, err = GetCert(db, "real-ca")
+	assert.ErrorIs(t, err, ErrCertNotFound, "cert row should not have been written")
 	row, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if row.UsedAt != nil {
-		t.Error("token should not have been marked used after rollback")
-	}
+	require.NoError(t, err)
+	assert.Nil(t, row.UsedAt, "token should not have been marked used after rollback")
 }
 
 func TestIssueRotationWithToken_AtomicSuccess(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	rootID, _, _ := seed(t, db)
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// New cert (a successor root) with replaces_id pointing at the existing root.
 	newCert := makeCert("rotated-root", "root_ca", nil, "Replacement Root")
@@ -300,58 +206,38 @@ func TestIssueRotationWithToken_AtomicSuccess(t *testing.T) {
 	newCert.ReplacesID = &rid
 	newKey := sampleKey("rotated-root")
 
-	if err := IssueRotationWithToken(db, newCert, newKey, nil, rootID, tok, "/certs/rotated-root"); err != nil {
-		t.Fatalf("IssueRotationWithToken: %v", err)
-	}
+	require.NoError(t, IssueRotationWithToken(db, newCert, newKey, nil, rootID, tok, "/certs/rotated-root"),
+		"IssueRotationWithToken")
 
 	// Old cert is now superseded with replaced_by_id forward-link.
 	old, err := GetCert(db, rootID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if old.Status != "superseded" {
-		t.Errorf("old status: got %q, want superseded", old.Status)
-	}
-	if old.ReplacedByID == nil || *old.ReplacedByID != "rotated-root" {
-		t.Errorf("old.ReplacedByID: got %v, want 'rotated-root'", old.ReplacedByID)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "superseded", old.Status, "old status")
+	require.NotNil(t, old.ReplacedByID)
+	assert.Equal(t, "rotated-root", *old.ReplacedByID)
 
 	// New cert is active with replaces_id back-link.
 	got, err := GetCert(db, "rotated-root")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != "active" {
-		t.Errorf("new status: got %q, want active", got.Status)
-	}
-	if got.ReplacesID == nil || *got.ReplacesID != rootID {
-		t.Errorf("new.ReplacesID: got %v, want %s", got.ReplacesID, rootID)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "active", got.Status, "new status")
+	require.NotNil(t, got.ReplacesID)
+	assert.Equal(t, rootID, *got.ReplacesID)
 
 	// Token is marked.
 	row, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if row.UsedAt == nil {
-		t.Error("token should have been marked used")
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, row.UsedAt, "token should have been marked used")
 }
 
 func TestIssueRotationWithToken_RefusesNonActiveOld(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	_, _, leafID := seed(t, db)
 	// Pre-revoke the leaf — rotation must refuse.
-	if _, err := MarkRevoked(db, leafID, 1, time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	_, err := MarkRevoked(db, leafID, 1, time.Now())
+	require.NoError(t, err)
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	newCert := makeCert("would-be-replacement", "leaf", ptrStr("inter-id"), "leaf2.test")
 	newCert.SerialNumber = "02" // distinct from seed leaf to avoid UNIQUE(parent_id, serial)
@@ -359,27 +245,18 @@ func TestIssueRotationWithToken_RefusesNonActiveOld(t *testing.T) {
 	newCert.ReplacesID = &lid
 
 	err = IssueRotationWithToken(db, newCert, sampleKey("would-be-replacement"), nil, leafID, tok, "/x")
-	if !errors.Is(err, ErrSupersedeNotActive) {
-		t.Errorf("got %v, want ErrSupersedeNotActive", err)
-	}
+	assert.ErrorIs(t, err, ErrSupersedeNotActive)
 	// And nothing else changed: token unmarked, new cert absent.
-	if _, err := GetCert(db, "would-be-replacement"); !errors.Is(err, ErrCertNotFound) {
-		t.Error("new cert should not have been written")
-	}
+	_, err = GetCert(db, "would-be-replacement")
+	assert.ErrorIs(t, err, ErrCertNotFound, "new cert should not have been written")
 	row, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if row.UsedAt != nil {
-		t.Error("token should not have been marked used")
-	}
+	require.NoError(t, err)
+	assert.Nil(t, row.UsedAt, "token should not have been marked used")
 }
 
 func TestIssueRotationWithToken_RejectsBadInputs(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	rootID, _, _ := seed(t, db)
 	tok, _ := CreateIdemToken(db)
 
@@ -411,52 +288,37 @@ func TestIssueRotationWithToken_RejectsBadInputs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.fn(); err == nil {
-				t.Error("expected error, got nil")
-			}
+			assert.Error(t, tc.fn())
 		})
 	}
 }
 
 func TestIssueCertWithToken_RejectsEmptyToken(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	c := sampleCert("x")
 	c.Type = "root_ca"
 	c.ParentID = nil
-	if err := IssueCertWithToken(db, c, sampleKey("x"), nil, "", "/x"); err == nil {
-		t.Error("expected error on empty form token")
-	}
+	assert.Error(t, IssueCertWithToken(db, c, sampleKey("x"), nil, "", "/x"),
+		"expected error on empty form token")
 }
 
 func TestCleanupExpired(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	// Make the just-created token "expired" by setting expires_at into the
 	// past directly. CreateIdemToken won't do that itself.
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(
+	require.NoError(t, err)
+	_, err = db.Exec(
 		`UPDATE idempotency_tokens SET expires_at = datetime('now', '-1 hour') WHERE token = ?`,
 		tok,
-	); err != nil {
-		t.Fatal(err)
-	}
+	)
+	require.NoError(t, err)
 
 	n, err := CleanupExpiredIdemTokens(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Errorf("deleted: got %d, want 1", n)
-	}
-	if _, err := LookupIdemToken(db, tok); !errors.Is(err, ErrIdemTokenNotFound) {
-		t.Errorf("after cleanup: got %v, want ErrIdemTokenNotFound", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "deleted")
+	_, err = LookupIdemToken(db, tok)
+	assert.ErrorIs(t, err, ErrIdemTokenNotFound, "after cleanup")
 }

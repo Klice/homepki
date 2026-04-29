@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/Klice/homepki/internal/crypto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // seedCertWithRealKey inserts a cert + a real two-tier sealed private-key
@@ -15,9 +17,7 @@ func seedCertWithRealKey(t *testing.T, db sqlcDBTX, id string, kek []byte) {
 	t.Helper()
 	plaintext := []byte("PRETEND-PKCS8-" + id)
 	sealed, err := crypto.SealPrivateKey(kek, id, plaintext)
-	if err != nil {
-		t.Fatalf("SealPrivateKey: %v", err)
-	}
+	require.NoError(t, err, "SealPrivateKey")
 	c := sampleCert(id)
 	c.ParentID = nil
 	c.Type = "root_ca"
@@ -31,16 +31,12 @@ func seedCertWithRealKey(t *testing.T, db sqlcDBTX, id string, kek []byte) {
 		CipherNonce: sealed.CipherNonce,
 		Ciphertext:  sealed.Ciphertext,
 	}
-	if err := insertCertTx(db, c, k); err != nil {
-		t.Fatalf("insertCertTx: %v", err)
-	}
+	require.NoError(t, insertCertTx(db, c, k), "insertCertTx")
 }
 
 func TestRotate_HappyPath_RewrapsAllAndUpdatesSettings(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 
 	// Seed the install with a verifier so the rotation has something to
 	// "replace" — though RotatePassphrase doesn't read the old verifier
@@ -49,9 +45,7 @@ func TestRotate_HappyPath_RewrapsAllAndUpdatesSettings(t *testing.T) {
 	for i := range oldKEK {
 		oldKEK[i] = 0xAA
 	}
-	if err := SetSetting(db, SettingPassphraseVerifier, crypto.Verifier(oldKEK)); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, SetSetting(db, SettingPassphraseVerifier, crypto.Verifier(oldKEK)))
 
 	// Seed three certs so the rewrap loop has work to do.
 	seedCertWithRealKey(t, db, "a", oldKEK)
@@ -63,9 +57,7 @@ func TestRotate_HappyPath_RewrapsAllAndUpdatesSettings(t *testing.T) {
 	origCT := map[string][]byte{}
 	for _, id := range []string{"a", "b", "c"} {
 		k, err := GetCertKey(db, id)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		origCT[id] = append([]byte(nil), k.Ciphertext...)
 	}
 
@@ -74,34 +66,28 @@ func TestRotate_HappyPath_RewrapsAllAndUpdatesSettings(t *testing.T) {
 		newKEK[i] = 0xBB
 	}
 	tok, err := CreateIdemToken(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	in := RotatePassphraseInputs{
 		NewSalt:       []byte("0123456789abcdef"),
 		NewParamsJSON: []byte(`{"time":3,"memory":65536,"threads":2,"key_len":32}`),
 		NewVerifier:   crypto.Verifier(newKEK),
 	}
-	if err := RotatePassphrase(db, in, RewrapWithKEKs(oldKEK, newKEK), tok, "/settings"); err != nil {
-		t.Fatalf("RotatePassphrase: %v", err)
-	}
+	require.NoError(t, RotatePassphrase(db, in, RewrapWithKEKs(oldKEK, newKEK), tok, "/settings"),
+		"RotatePassphrase")
 
 	// 1. settings now reflect the new salt / params / verifier.
-	if v, _ := GetSetting(db, SettingKDFSalt); string(v) != "0123456789abcdef" {
-		t.Errorf("kdf_salt: got %q", v)
-	}
-	if v, _ := GetSetting(db, SettingPassphraseVerifier); !crypto.VerifierEqual(v, crypto.Verifier(newKEK)) {
-		t.Errorf("verifier didn't match new KEK's verifier")
-	}
+	v, _ := GetSetting(db, SettingKDFSalt)
+	assert.Equal(t, "0123456789abcdef", string(v), "kdf_salt")
+	v, _ = GetSetting(db, SettingPassphraseVerifier)
+	assert.True(t, crypto.VerifierEqual(v, crypto.Verifier(newKEK)),
+		"verifier didn't match new KEK's verifier")
 
 	// 2. Each rewrapped key opens under the NEW KEK and gives back the
 	//    original PKCS#8 plaintext, and the ciphertext column is bit-for-bit
 	//    unchanged (only the wrap layer rotated).
 	for _, id := range []string{"a", "b", "c"} {
 		k, err := GetCertKey(db, id)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		sealed := &crypto.SealedPrivateKey{
 			WrappedDEK:  k.WrappedDEK,
 			DEKNonce:    k.DEKNonce,
@@ -109,38 +95,28 @@ func TestRotate_HappyPath_RewrapsAllAndUpdatesSettings(t *testing.T) {
 			Ciphertext:  k.Ciphertext,
 		}
 		got, err := crypto.OpenPrivateKey(newKEK, id, sealed)
-		if err != nil {
-			t.Errorf("Open under new KEK for %s: %v", id, err)
+		if !assert.NoError(t, err, "Open under new KEK for %s", id) {
 			continue
 		}
 		want := "PRETEND-PKCS8-" + id
-		if string(got) != want {
-			t.Errorf("plaintext for %s: got %q, want %q", id, got, want)
-		}
-		if string(k.Ciphertext) != string(origCT[id]) {
-			t.Errorf("ciphertext for %s changed (should be untouched)", id)
-		}
+		assert.Equal(t, want, string(got), "plaintext for %s", id)
+		assert.Equal(t, origCT[id], k.Ciphertext, "ciphertext for %s changed (should be untouched)", id)
 		// And the OLD KEK no longer opens it.
-		if _, err := crypto.OpenPrivateKey(oldKEK, id, sealed); err == nil {
-			t.Errorf("old KEK should NOT open rewrapped key for %s", id)
-		}
+		_, err = crypto.OpenPrivateKey(oldKEK, id, sealed)
+		assert.Error(t, err, "old KEK should NOT open rewrapped key for %s", id)
 	}
 
 	// 3. The form token is now used and points at /settings.
 	row, err := LookupIdemToken(db, tok)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if row.UsedAt == nil || row.ResultURL == nil || *row.ResultURL != "/settings" {
-		t.Errorf("token state: used=%v url=%v", row.UsedAt, row.ResultURL)
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, row.UsedAt, "token should have been marked used")
+	require.NotNil(t, row.ResultURL)
+	assert.Equal(t, "/settings", *row.ResultURL)
 }
 
 func TestRotate_RewrapErrorRollsBackEverything(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 
 	oldKEK := make([]byte, crypto.KeyLen)
 	for i := range oldKEK {
@@ -167,42 +143,29 @@ func TestRotate_RewrapErrorRollsBackEverything(t *testing.T) {
 		NewParamsJSON: []byte(`{}`),
 		NewVerifier:   []byte("verifier"),
 	}
-	err := RotatePassphrase(db, in, rewrap, tok, "/settings")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, RotatePassphrase(db, in, rewrap, tok, "/settings"))
 
 	// 'a' wrap should be unchanged.
 	a, _ := GetCertKey(db, "a")
-	if string(a.WrappedDEK) != string(origAW.WrappedDEK) {
-		t.Error("'a' wrap was modified despite rollback")
-	}
-	if string(a.DEKNonce) != string(origAW.DEKNonce) {
-		t.Error("'a' nonce was modified despite rollback")
-	}
+	assert.Equal(t, origAW.WrappedDEK, a.WrappedDEK, "'a' wrap was modified despite rollback")
+	assert.Equal(t, origAW.DEKNonce, a.DEKNonce, "'a' nonce was modified despite rollback")
 	// 'b' wrap should be unchanged.
 	b, _ := GetCertKey(db, "b")
-	if string(b.WrappedDEK) != string(origBW.WrappedDEK) {
-		t.Error("'b' wrap was modified despite rollback")
-	}
+	assert.Equal(t, origBW.WrappedDEK, b.WrappedDEK, "'b' wrap was modified despite rollback")
 
 	// Settings rows should NOT have been written.
-	if v, err := GetSetting(db, SettingKDFSalt); err == nil && string(v) == "ffffffffffffffff" {
-		t.Error("kdf_salt was written despite rollback")
+	if v, err := GetSetting(db, SettingKDFSalt); err == nil {
+		assert.NotEqual(t, "ffffffffffffffff", string(v), "kdf_salt was written despite rollback")
 	}
 
 	// Form token should NOT be marked used.
 	row, _ := LookupIdemToken(db, tok)
-	if row.UsedAt != nil {
-		t.Error("token was marked used despite rollback")
-	}
+	assert.Nil(t, row.UsedAt, "token was marked used despite rollback")
 }
 
 func TestRotate_RejectsMissingInputs(t *testing.T) {
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 
 	tok, _ := CreateIdemToken(db)
 	cases := []struct {
@@ -217,9 +180,7 @@ func TestRotate_RejectsMissingInputs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		err := RotatePassphrase(db, tc.in, RewrapWithKEKs(nil, nil), tc.tok, "/settings")
-		if err == nil {
-			t.Errorf("%s: expected error, got nil", tc.name)
-		}
+		assert.Error(t, err, tc.name)
 	}
 }
 
@@ -227,9 +188,7 @@ func TestRotate_NoCertsIsValid(t *testing.T) {
 	// A fresh install with no issued certs should rotate cleanly — the
 	// rewrap loop is a no-op and the settings still update.
 	db := openTestDB(t)
-	if err := Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, Migrate(db))
 	oldKEK := make([]byte, crypto.KeyLen)
 	newKEK := make([]byte, crypto.KeyLen)
 	for i := range newKEK {
@@ -241,10 +200,8 @@ func TestRotate_NoCertsIsValid(t *testing.T) {
 		NewParamsJSON: []byte(`{"time":3,"memory":1024,"threads":1,"key_len":32}`),
 		NewVerifier:   crypto.Verifier(newKEK),
 	}
-	if err := RotatePassphrase(db, in, RewrapWithKEKs(oldKEK, newKEK), tok, "/settings"); err != nil {
-		t.Fatalf("RotatePassphrase: %v", err)
-	}
-	if v, _ := GetSetting(db, SettingKDFSalt); string(v) != "aaaaaaaaaaaaaaaa" {
-		t.Errorf("kdf_salt: got %q", v)
-	}
+	require.NoError(t, RotatePassphrase(db, in, RewrapWithKEKs(oldKEK, newKEK), tok, "/settings"),
+		"RotatePassphrase")
+	v, _ := GetSetting(db, SettingKDFSalt)
+	assert.Equal(t, "aaaaaaaaaaaaaaaa", string(v), "kdf_salt")
 }

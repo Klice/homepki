@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/Klice/homepki/internal/store"
 )
 
@@ -24,18 +27,12 @@ func crlHistoryFixture(t *testing.T) (*Server, *clientLite, string) {
 	// Trigger a second CRL by revoking the leaf.
 	c.get("/certs/" + leafID)
 	w := c.postForm("/certs/"+leafID+"/revoke", url.Values{"reason": {"1"}})
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("revoke setup failed: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusSeeOther, w.Code, "revoke setup failed")
 
 	// Sanity: store has exactly 2 CRLs for the intermediate.
 	crls, err := store.ListCRLs(db, interID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(crls) != 2 {
-		t.Fatalf("setup CRLs: got %d, want 2", len(crls))
-	}
+	require.NoError(t, err)
+	require.Len(t, crls, 2, "setup CRLs")
 	return srv, c, interID
 }
 
@@ -45,9 +42,7 @@ func TestCRLHistory_PageRendersAllRowsNewestFirst(t *testing.T) {
 	_, c, interID := crlHistoryFixture(t)
 
 	w := c.get("/certs/" + interID + "/crls")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d body=%q", w.Code, w.Body.String())
-	}
+	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 	for _, want := range []string{
 		"CRL history",
@@ -56,24 +51,18 @@ func TestCRLHistory_PageRendersAllRowsNewestFirst(t *testing.T) {
 		"/crl/" + interID + "/2.crl",
 		"/crl/" + interID + "/1.crl",
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q", want)
-		}
+		assert.Contains(t, body, want)
 	}
 	// CRL #2 should appear before CRL #1 (newest first).
 	idx2 := strings.Index(body, "/crl/"+interID+"/2.crl")
 	idx1 := strings.Index(body, "/crl/"+interID+"/1.crl")
-	if idx2 < 0 || idx1 < 0 || idx2 >= idx1 {
-		t.Errorf("CRL #2 should appear before CRL #1; got idx2=%d idx1=%d", idx2, idx1)
-	}
+	assert.True(t, idx2 >= 0 && idx1 >= 0 && idx2 < idx1, "CRL #2 should appear before CRL #1; got idx2=%d idx1=%d", idx2, idx1)
 }
 
 func TestCRLHistory_404OnUnknownCert(t *testing.T) {
 	_, c, _ := crlHistoryFixture(t)
 	w := c.get("/certs/nope/crls")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestCRLHistory_404OnLeaf(t *testing.T) {
@@ -85,9 +74,7 @@ func TestCRLHistory_404OnLeaf(t *testing.T) {
 	_ = srv
 
 	w := c.get("/certs/" + leafID + "/crls")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("leaf history: got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code, "leaf history")
 	_ = db
 }
 
@@ -96,9 +83,8 @@ func TestCRLHistory_RedirectsWhenLocked(t *testing.T) {
 	srv.keystore.Lock()
 
 	w := c.get("/certs/" + interID + "/crls")
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/unlock" {
-		t.Errorf("got status=%d location=%q", w.Code, w.Header().Get("Location"))
-	}
+	assert.Equal(t, http.StatusSeeOther, w.Code)
+	assert.Equal(t, "/unlock", w.Header().Get("Location"))
 }
 
 func TestCertDetail_LinksToCRLHistoryForCAs(t *testing.T) {
@@ -111,14 +97,10 @@ func TestCertDetail_LinksToCRLHistoryForCAs(t *testing.T) {
 
 	for _, id := range []string{rootID, interID} {
 		body := c.get("/certs/" + id).Body.String()
-		if !strings.Contains(body, "/certs/"+id+"/crls") {
-			t.Errorf("CA %s detail missing CRL history link", id)
-		}
+		assert.Contains(t, body, "/certs/"+id+"/crls", "CA %s detail missing CRL history link", id)
 	}
 	body := c.get("/certs/" + leafID).Body.String()
-	if strings.Contains(body, "/crls") {
-		t.Errorf("leaf detail should not link to CRL history")
-	}
+	assert.NotContains(t, body, "/crls", "leaf detail should not link to CRL history")
 	_ = db
 }
 
@@ -129,35 +111,19 @@ func TestCRLByNumber_RoundTrip(t *testing.T) {
 
 	// CRL #1 should be the empty initial CRL (entries == 0).
 	w := c.get("/crl/" + interID + "/1.crl")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d", w.Code)
-	}
-	if ct := w.Header().Get("Content-Type"); ct != "application/pkix-crl" {
-		t.Errorf("Content-Type: %q", ct)
-	}
-	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
-		t.Errorf("expected immutable Cache-Control, got %q", cc)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/pkix-crl", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Header().Get("Cache-Control"), "immutable")
 	parsed, err := x509.ParseRevocationList(w.Body.Bytes())
-	if err != nil {
-		t.Fatalf("ParseRevocationList: %v", err)
-	}
-	if len(parsed.RevokedCertificateEntries) != 0 {
-		t.Errorf("CRL #1 should be empty, got %d entries", len(parsed.RevokedCertificateEntries))
-	}
+	require.NoError(t, err, "ParseRevocationList")
+	assert.Empty(t, parsed.RevokedCertificateEntries, "CRL #1 should be empty")
 
 	// CRL #2 has the revoked leaf.
 	w = c.get("/crl/" + interID + "/2.crl")
-	if w.Code != http.StatusOK {
-		t.Fatalf("status: %d", w.Code)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
 	parsed, err = x509.ParseRevocationList(w.Body.Bytes())
-	if err != nil {
-		t.Fatalf("ParseRevocationList: %v", err)
-	}
-	if len(parsed.RevokedCertificateEntries) != 1 {
-		t.Errorf("CRL #2: got %d entries, want 1", len(parsed.RevokedCertificateEntries))
-	}
+	require.NoError(t, err, "ParseRevocationList")
+	assert.Len(t, parsed.RevokedCertificateEntries, 1, "CRL #2 entries")
 }
 
 func TestCRLByNumber_PublicAccess(t *testing.T) {
@@ -166,25 +132,19 @@ func TestCRLByNumber_PublicAccess(t *testing.T) {
 	srv, _, interID := crlHistoryFixture(t)
 	c := newClient(t, srv) // no installSession
 	w := c.get("/crl/" + interID + "/1.crl")
-	if w.Code != http.StatusOK {
-		t.Errorf("unauthenticated GET: got %d, want 200", w.Code)
-	}
+	assert.Equal(t, http.StatusOK, w.Code, "unauthenticated GET")
 }
 
 func TestCRLByNumber_404OnNonNumericSegment(t *testing.T) {
 	_, c, interID := crlHistoryFixture(t)
 	w := c.get("/crl/" + interID + "/abc.crl")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("non-numeric: got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code, "non-numeric")
 }
 
 func TestCRLByNumber_404OnMissingCRL(t *testing.T) {
 	_, c, interID := crlHistoryFixture(t)
 	w := c.get("/crl/" + interID + "/99.crl")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("missing CRL: got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code, "missing CRL")
 }
 
 func TestCRLByNumber_404OnLeaf(t *testing.T) {
@@ -197,15 +157,11 @@ func TestCRLByNumber_404OnLeaf(t *testing.T) {
 	_ = db
 
 	w := c.get("/crl/" + leafID + "/1.crl")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("leaf historical CRL: got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code, "leaf historical CRL")
 }
 
 func TestCRLByNumber_404OnMissingSuffix(t *testing.T) {
 	_, c, interID := crlHistoryFixture(t)
 	w := c.get("/crl/" + interID + "/1")
-	if w.Code != http.StatusNotFound {
-		t.Errorf("no .crl suffix: got %d, want 404", w.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, w.Code, "no .crl suffix")
 }
