@@ -1,0 +1,30 @@
+# Build context — keep it small. The Dockerfile only needs Go sources,
+# go.mod/go.sum, the embedded templates and static assets.
+
+.git
+.github
+.devcontainer
+bin
+tmp
+.devdata
+
+# Editor / OS noise
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Tests / docs / mocks not needed at build time
+mockups
+docs
+PLAN.md
+SPEC.md
+
+# Generated / local-only artifacts
+*.db
+*.db-shm
+*.db-wal
+deploy/certs
+
+# Don't bake the smoke harness into the image
+scripts/smoke.sh
