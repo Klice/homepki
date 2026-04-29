@@ -90,7 +90,7 @@ func loadMigrations() ([]migration, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list migrations: %w", err)
 	}
-	var out []migration
+	out := make([]migration, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() {
 			continue

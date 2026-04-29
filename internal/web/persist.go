@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"time"
 
 	"github.com/Klice/homepki/internal/crypto"
@@ -210,9 +211,8 @@ func certFromIssued(id, certType string, parentID *string, issued *pki.Issued, k
 	c := issued.Cert
 	fp := sha256.Sum256(issued.DER)
 
-	var sanDNS []string
-	sanDNS = append(sanDNS, c.DNSNames...)
-	var sanIPs []string
+	sanDNS := slices.Clone(c.DNSNames)
+	sanIPs := make([]string, 0, len(c.IPAddresses))
 	for _, ip := range c.IPAddresses {
 		sanIPs = append(sanIPs, ip.String())
 	}

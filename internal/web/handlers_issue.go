@@ -382,10 +382,11 @@ func validateCommon(d issueViewData) string {
 }
 
 func parseSANDNS(input string) []string {
-	var out []string
-	for _, s := range strings.FieldsFunc(input, func(r rune) bool {
+	fields := strings.FieldsFunc(input, func(r rune) bool {
 		return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t'
-	}) {
+	})
+	out := make([]string, 0, len(fields))
+	for _, s := range fields {
 		s = strings.TrimSpace(s)
 		if s != "" {
 			out = append(out, s)
@@ -395,8 +396,9 @@ func parseSANDNS(input string) []string {
 }
 
 func parseSANIPs(input string) ([]net.IP, error) {
-	var out []net.IP
-	for _, s := range parseSANDNS(input) {
+	dns := parseSANDNS(input)
+	out := make([]net.IP, 0, len(dns))
+	for _, s := range dns {
 		ip := net.ParseIP(s)
 		if ip == nil {
 			return nil, fmt.Errorf("not a valid IP address: %q", s)

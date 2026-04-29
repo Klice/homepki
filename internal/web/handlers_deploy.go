@@ -320,7 +320,7 @@ func (s *Server) runAutoOnRotateTargets(r *http.Request, newCert *store.Cert) {
 		slog.Warn("auto-on-rotate: ListDeployTargets failed", "cert", newCert.ID, "err", err)
 		return
 	}
-	var auto []*store.DeployTarget
+	auto := make([]*store.DeployTarget, 0, len(targets))
 	for _, t := range targets {
 		if t.AutoOnRotate {
 			auto = append(auto, t)

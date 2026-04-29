@@ -24,11 +24,11 @@ const layoutPath = "templates/layout.html"
 // Page templates must define a "content" block; "title" and "header_actions"
 // are optional and fall back to the layout's defaults.
 func loadTemplates() (map[string]*template.Template, error) {
-	out := map[string]*template.Template{}
 	pages, err := fs.Glob(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("glob templates: %w", err)
 	}
+	out := make(map[string]*template.Template, len(pages))
 	for _, p := range pages {
 		if p == layoutPath {
 			continue
