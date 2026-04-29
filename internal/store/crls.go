@@ -76,6 +76,51 @@ func GetLatestCRL(db sqlcDBTX, issuerID string) (*CRL, error) {
 	}, nil
 }
 
+// ListCRLs returns every CRL row for issuerID, ordered newest first
+// (highest crl_number first). Backs the CRL history page per API.md §5.3.
+func ListCRLs(db sqlcDBTX, issuerID string) ([]*CRL, error) {
+	rows, err := storedb.New(db).ListCRLsByIssuer(context.Background(), issuerID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*CRL, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &CRL{
+			IssuerCertID: r.IssuerCertID,
+			CRLNumber:    r.CrlNumber,
+			ThisUpdate:   r.ThisUpdate,
+			NextUpdate:   r.NextUpdate,
+			DER:          r.Der,
+			UpdatedAt:    r.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// GetCRLByNumber returns the single CRL row identified by (issuerID,
+// number). Returns ErrCRLNotFound if the row does not exist. Backs the
+// per-version download endpoint.
+func GetCRLByNumber(db sqlcDBTX, issuerID string, number int64) (*CRL, error) {
+	row, err := storedb.New(db).GetCRLByNumber(context.Background(), storedb.GetCRLByNumberParams{
+		IssuerCertID: issuerID,
+		CrlNumber:    number,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrCRLNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &CRL{
+		IssuerCertID: row.IssuerCertID,
+		CRLNumber:    row.CrlNumber,
+		ThisUpdate:   row.ThisUpdate,
+		NextUpdate:   row.NextUpdate,
+		DER:          row.Der,
+		UpdatedAt:    row.UpdatedAt,
+	}, nil
+}
+
 // NextCRLNumber returns one more than the highest crl_number for issuerID,
 // or 1 if no CRLs exist yet. Strict monotonicity per LIFECYCLE.md §6.4.
 func NextCRLNumber(db sqlcDBTX, issuerID string) (int64, error) {
