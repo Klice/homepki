@@ -306,3 +306,37 @@ func TestDetailHidesRotateOnRevoked(t *testing.T) {
 	}
 	_ = db
 }
+
+func TestDetailShowsRevokeOnSuperseded(t *testing.T) {
+	// After rotation the old cert is "superseded". The revoke form must
+	// still be available so an operator can put the old serial on the
+	// CRL — useful when the rotation was triggered by key compromise.
+	srv, db := testServer(t)
+	fastSetup(t, srv, db)
+	c := newClient(t, srv)
+	installSession(t, srv, c)
+	_, _, leafID := issueChain(t, c)
+
+	// Rotate the leaf — the original now becomes superseded.
+	mustIssue(t, c, "/certs/"+leafID+"/rotate", url.Values{
+		"subject_cn":      {"revoke.leaf.test"},
+		"key_algo":        {"ecdsa"},
+		"key_algo_params": {"P-256"},
+		"san_dns":         {"revoke.leaf.test"},
+		"validity_days":   {"90"},
+	})
+
+	w := c.get("/certs/" + leafID)
+	body := w.Body.String()
+	if !strings.Contains(body, "Revoke this certificate") {
+		t.Error("revoke form should still be available on superseded cert")
+	}
+	if !strings.Contains(body, `action="/certs/`+leafID+`/revoke"`) {
+		t.Error("revoke form action missing")
+	}
+	// Rotate is hidden — the cert is no longer active.
+	if strings.Contains(body, "Rotate this certificate") {
+		t.Error("rotate link should be hidden on superseded cert")
+	}
+	_ = db
+}
