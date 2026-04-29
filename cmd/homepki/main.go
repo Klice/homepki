@@ -60,6 +60,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	defer handler.Stop()
+
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           handler,
@@ -68,6 +70,11 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Idempotency-token sweep per STORAGE.md §5.7. Lazy cleanup happens
+	// inside every token lookup; this hourly sweep just caps growth in
+	// case nobody loads forms for a while.
+	go runIdemSweep(ctx, db)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -91,6 +98,33 @@ func run() error {
 		return err
 	}
 	return nil
+}
+
+// idemSweepInterval is how often we delete expired idempotency tokens
+// per STORAGE.md §5.7. Hourly is plenty given lazy cleanup also runs on
+// every lookup.
+const idemSweepInterval = time.Hour
+
+// runIdemSweep deletes expired idempotency tokens on a periodic ticker.
+// Returns when ctx is cancelled (graceful shutdown).
+func runIdemSweep(ctx context.Context, db *sql.DB) {
+	t := time.NewTicker(idemSweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			n, err := store.CleanupExpiredIdemTokens(db)
+			if err != nil {
+				slog.Warn("idem sweep failed", "err", err)
+				continue
+			}
+			if n > 0 {
+				slog.Info("idem sweep", "deleted", n)
+			}
+		}
+	}
 }
 
 // tryAutoUnlock loads the salt + KDF params + verifier from settings and
