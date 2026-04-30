@@ -47,6 +47,7 @@ type Certificate struct {
 	ReplacesID        *string
 	ReplacedByID      *string
 	CreatedAt         time.Time
+	Source            string
 }
 
 type Crl struct {

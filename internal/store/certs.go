@@ -42,6 +42,11 @@ type Cert struct {
 	ReplacesID        *string
 	ReplacedByID      *string
 	CreatedAt         time.Time
+	// Source distinguishes homepki-issued certs from operator-imported
+	// ones (per docs/STORAGE.md §5.3). Always one of "issued" |
+	// "imported"; defaults to "issued" so existing callers don't have
+	// to set it.
+	Source string
 }
 
 // CertKey mirrors a row in the cert_keys table. The blobs are AEAD output;
@@ -248,12 +253,29 @@ func certInsertParams(c *Cert) storedb.InsertCertificateParams {
 		FingerprintSha256: c.FingerprintSHA256,
 		Status:            nonEmptyOrDefault(c.Status, "active"),
 		ReplacesID:        c.ReplacesID,
+		Source:            nonEmptyOrDefault(c.Source, "issued"),
 	}
 }
 
 // GetCert loads a cert row by id. Returns ErrCertNotFound if missing.
 func GetCert(db sqlcDBTX, id string) (*Cert, error) {
 	row, err := storedb.New(db).GetCertificate(context.Background(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrCertNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return certFromRow(row)
+}
+
+// GetCertByFingerprint loads a cert row by its SHA-256 fingerprint (the
+// hex string we store in fingerprint_sha256). Returns ErrCertNotFound
+// if no row matches. Backs the import flow's idempotency check —
+// re-uploading the same root cert resolves to the same row instead of
+// creating a duplicate.
+func GetCertByFingerprint(db sqlcDBTX, fingerprintSHA256 string) (*Cert, error) {
+	row, err := storedb.New(db).GetCertByFingerprint(context.Background(), fingerprintSHA256)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCertNotFound
 	}
@@ -291,6 +313,7 @@ func certFromRow(row storedb.Certificate) (*Cert, error) {
 		ReplacesID:        row.ReplacesID,
 		ReplacedByID:      row.ReplacedByID,
 		CreatedAt:         row.CreatedAt,
+		Source:            row.Source,
 	}
 	if err := json.Unmarshal([]byte(row.SanDns), &c.SANDNS); err != nil {
 		return nil, fmt.Errorf("unmarshal san_dns: %w", err)

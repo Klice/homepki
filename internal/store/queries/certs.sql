@@ -7,8 +7,8 @@ INSERT INTO certificates (
     san_dns, san_ip, is_ca, path_len_constraint,
     key_algo, key_algo_params, key_usage, ext_key_usage,
     not_before, not_after, der_cert, fingerprint_sha256,
-    status, replaces_id
-) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?);
+    status, replaces_id, source
+) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?);
 
 -- name: InsertCertKey :exec
 INSERT INTO cert_keys (cert_id, kek_tier, wrapped_dek, dek_nonce, cipher_nonce, ciphertext)
@@ -20,9 +20,21 @@ SELECT id, type, parent_id, serial_number,
        san_dns, san_ip, is_ca, path_len_constraint,
        key_algo, key_algo_params, key_usage, ext_key_usage,
        not_before, not_after, der_cert, fingerprint_sha256,
-       status, revoked_at, revocation_reason, replaces_id, replaced_by_id, created_at
+       status, revoked_at, revocation_reason, replaces_id, replaced_by_id,
+       created_at, source
 FROM certificates
 WHERE id = ?;
+
+-- name: GetCertByFingerprint :one
+SELECT id, type, parent_id, serial_number,
+       subject_cn, subject_o, subject_ou, subject_l, subject_st, subject_c,
+       san_dns, san_ip, is_ca, path_len_constraint,
+       key_algo, key_algo_params, key_usage, ext_key_usage,
+       not_before, not_after, der_cert, fingerprint_sha256,
+       status, revoked_at, revocation_reason, replaces_id, replaced_by_id,
+       created_at, source
+FROM certificates
+WHERE fingerprint_sha256 = ?;
 
 -- name: GetCertKeyByID :one
 SELECT cert_id, kek_tier, wrapped_dek, dek_nonce, cipher_nonce, ciphertext
