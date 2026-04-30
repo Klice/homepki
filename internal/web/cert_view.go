@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/x509"
 	"fmt"
 	"strings"
 	"time"
@@ -46,6 +47,12 @@ type CertView struct {
 	// formatted with colons (e.g. "8a:2c:11"). Used in the row-meta line
 	// where the full fingerprint would dominate the column.
 	FingerprintShort string
+
+	// CanSignCRL is true when IsCA AND the parsed cert carries the
+	// cRLSign KeyUsage bit. Imported roots minted without cRLSign land
+	// here as false: their /crl/{id}.crl endpoint structurally has
+	// nothing to serve, so the row's CRL links are hidden.
+	CanSignCRL bool
 }
 
 // newCertView produces a CertView. cnByID is a lookup map of cert ID →
@@ -74,7 +81,19 @@ func newCertView(c *store.Cert, cnByID map[string]string, now time.Time) *CertVi
 	cv.SANsDisplay = strings.Join(parts, ", ")
 	cv.TypeDisplay = shortType(c.Type)
 	cv.FingerprintShort = shortFingerprint(c.FingerprintSHA256)
+	cv.CanSignCRL = c.IsCA && certKeyUsageHasCRLSign(c.DERCert)
 	return cv
+}
+
+// certKeyUsageHasCRLSign returns true when the parsed DER carries the
+// cRLSign KeyUsage bit. False on parse failure (the conservative branch
+// hides CRL UI rather than producing dead links).
+func certKeyUsageHasCRLSign(der []byte) bool {
+	c, err := x509.ParseCertificate(der)
+	if err != nil {
+		return false
+	}
+	return c.KeyUsage&x509.KeyUsageCRLSign != 0
 }
 
 func shortType(t string) string {

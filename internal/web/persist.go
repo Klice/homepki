@@ -262,12 +262,19 @@ func (s *Server) persistImportedRoot(certDER []byte, cert *x509.Certificate, key
 		Ciphertext:  sealed.Ciphertext,
 	}
 
-	// Initial CRL signed by the imported key. Same shape as the
-	// CA-issuance path: lets /crl/{id}.crl return 200 immediately
-	// instead of 404 until the first revocation.
-	initialCRL, err := buildInitialCRLFromKey(id, cert, key)
-	if err != nil {
-		return "", fmt.Errorf("persistImportedRoot: initial CRL: %w", err)
+	// Initial CRL signed by the imported key — but only when the cert
+	// declares cRLSign in its KeyUsage. RFC 5280 §4.2.1.3 requires it
+	// for any CRL signer, and x509.CreateRevocationList enforces the
+	// rule. Roots minted without cRLSign (common for older or
+	// constrained PKIs) are still imported — their /crl/{id}.crl just
+	// 404s, and revocation has to be managed out-of-band, the same way
+	// root revocation already is per LIFECYCLE.md §5.4.
+	var initialCRL *store.CRL
+	if cert.KeyUsage&x509.KeyUsageCRLSign != 0 {
+		initialCRL, err = buildInitialCRLFromKey(id, cert, key)
+		if err != nil {
+			return "", fmt.Errorf("persistImportedRoot: initial CRL: %w", err)
+		}
 	}
 
 	resultURL := "/certs/" + id

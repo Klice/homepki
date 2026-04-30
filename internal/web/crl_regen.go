@@ -1,8 +1,11 @@
 package web
 
 import (
+	"crypto/x509"
 	"database/sql"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"strconv"
 	"time"
@@ -10,6 +13,14 @@ import (
 	"github.com/Klice/homepki/internal/pki"
 	"github.com/Klice/homepki/internal/store"
 )
+
+// ErrIssuerCannotSignCRL is returned by regenerateCRL when the issuer
+// cert doesn't carry the cRLSign KeyUsage bit (RFC 5280 §4.2.1.3).
+// Surfaces explicitly so callers can distinguish "this CA structurally
+// cannot publish a CRL" from a transient signing failure. Most relevant
+// to imported roots minted without cRLSign — homepki accepts the import
+// (per persist.go) but won't write CRL rows for it.
+var ErrIssuerCannotSignCRL = errors.New("issuer cert lacks cRLSign key usage")
 
 // regenerateCRL builds a fresh CRL for issuerID by listing every revoked
 // child cert and signing the result with the issuer's key. The new CRL row
@@ -21,6 +32,9 @@ func (s *Server) regenerateCRL(issuerID string) (*store.CRL, error) {
 	signer, _, err := s.loadSigner(issuerID)
 	if err != nil {
 		return nil, fmt.Errorf("regen CRL: load signer: %w", err)
+	}
+	if signer.Cert.KeyUsage&x509.KeyUsageCRLSign == 0 {
+		return nil, ErrIssuerCannotSignCRL
 	}
 
 	children, err := store.ListRevokedChildren(s.db, issuerID)
@@ -90,6 +104,16 @@ func (s *Server) revokeAndRegen(cert *store.Cert, reason int) (bool, error) {
 		return true, nil
 	}
 	if _, err := s.regenerateCRL(*cert.ParentID); err != nil {
+		// Same shape as the root case: the issuer structurally
+		// can't publish a CRL (typically an imported root minted
+		// without cRLSign). Mark revoked, log, and treat the
+		// transition as successful — the operator already accepted
+		// the trade-off at import time.
+		if errors.Is(err, ErrIssuerCannotSignCRL) {
+			slog.Warn("revoke: issuer cannot sign CRL — revocation recorded but no CRL update",
+				"cert", cert.ID, "issuer", *cert.ParentID)
+			return true, nil
+		}
 		return true, err
 	}
 	return true, nil
