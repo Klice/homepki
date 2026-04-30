@@ -451,9 +451,14 @@ form-token replay path returns the same redirect as the original
 submission.
 
 After successful insert: an empty initial CRL signed by the imported
-key is written so `GET /crl/{id}.crl` returns 200 immediately. Note: the
-imported cert must have `cRLSign` in its KeyUsage extension for this to
-work (the standard for any CA cert).
+key is written so `GET /crl/{id}.crl` returns 200 immediately — but
+**only when the imported cert carries the `cRLSign` KeyUsage bit**. If
+it doesn't (older or constrained PKIs sometimes omit it), the cert is
+still imported, the CRL row is skipped, and `GET /crl/{id}.crl`
+returns **404** for that issuer. The dashboard hides the CRL download
+links for such CAs and revoking children under them succeeds without a
+CRL update — see [LIFECYCLE.md §7.5](LIFECYCLE.md#75-imported-roots-without-crlsign)
+for the full trade-off.
 
 ---
 
