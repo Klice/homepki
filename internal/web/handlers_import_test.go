@@ -27,6 +27,15 @@ import (
 // algorithm parity build their own.
 func makeImportableRoot(t *testing.T, cn string) (certPEM, keyPEM string) {
 	t.Helper()
+	return makeImportableRootWithKeyUsage(t, cn, x509.KeyUsageCertSign|x509.KeyUsageCRLSign)
+}
+
+// makeImportableRootWithKeyUsage is the variant for tests that need a
+// specific KeyUsage — particularly the no-cRLSign case, which exercises
+// the import-side relax (skip initial CRL) and the revoke-side relax
+// (treat issuer-can't-sign as a structural skip rather than 500).
+func makeImportableRootWithKeyUsage(t *testing.T, cn string, ku x509.KeyUsage) (certPEM, keyPEM string) {
+	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -38,7 +47,7 @@ func makeImportableRoot(t *testing.T, cn string) (certPEM, keyPEM string) {
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
 		IsCA:                  true,
 		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		KeyUsage:              ku,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, priv.Public(), priv)
 	require.NoError(t, err)
@@ -460,5 +469,150 @@ func TestImportRoot_AllowsIntermediateUnderImportedRoot(t *testing.T) {
 		"homepki-issued intermediate must have a CRL DP")
 	dp := parsed.CRLDistributionPoints[0]
 	assert.Contains(t, dp, "/crl/"+rootID)
+}
+
+// ============== no-cRLSign import path ==============
+
+// importNoCRLSignRoot is the helper-of-helpers: imports a root that
+// lacks cRLSign and returns the new id. Centralizes the GET-then-POST
+// dance so the actual test bodies stay readable.
+func importNoCRLSignRoot(t *testing.T, c *clientLite, cn string) string {
+	t.Helper()
+	certPEM, keyPEM := makeImportableRootWithKeyUsage(t, cn, x509.KeyUsageCertSign)
+	w := c.get("/certs/import/root")
+	require.Equal(t, http.StatusOK, w.Code)
+	form := url.Values{
+		"cert_pem":   {certPEM},
+		"key_pem":    {keyPEM},
+		"form_token": {extractFormToken(t, w.Body.String())},
+	}
+	resp := c.postForm("/certs/import/root", form)
+	require.Equal(t, http.StatusSeeOther, resp.Code, "body=%q", resp.Body.String())
+	return strings.TrimPrefix(resp.Header().Get("Location"), "/certs/")
+}
+
+func TestImportRoot_NoCRLSign_ImportSucceedsWithoutInitialCRL(t *testing.T) {
+	srv, db := testServer(t)
+	fastSetup(t, srv, db)
+	c := newClient(t, srv)
+	installSession(t, srv, c)
+
+	id := importNoCRLSignRoot(t, c, "No CRLSign Root")
+
+	cert, err := store.GetCert(srv.db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "imported", cert.Source)
+	assert.Equal(t, "root_ca", cert.Type)
+
+	// No CRL row should have been written — the cert can't sign one.
+	_, err = store.GetLatestCRL(srv.db, id)
+	assert.ErrorIs(t, err, store.ErrCRLNotFound,
+		"imported root without cRLSign must not have an initial CRL row")
+
+	// Public CRL endpoint should 404 since there's no row.
+	w := c.get("/crl/" + id + ".crl")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestImportRoot_NoCRLSign_DetailHidesCRLLinks(t *testing.T) {
+	srv, db := testServer(t)
+	fastSetup(t, srv, db)
+	c := newClient(t, srv)
+	installSession(t, srv, c)
+
+	id := importNoCRLSignRoot(t, c, "No CRLSign Detail")
+
+	w := c.get("/certs/" + id)
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.NotContains(t, body, `href="/crl/`+id+`.crl"`,
+		"latest.crl link must be hidden when issuer can't sign CRLs")
+	assert.NotContains(t, body, `href="/certs/`+id+`/crls"`,
+		"CRL history link must be hidden when issuer can't sign CRLs")
+	assert.Contains(t, body, "cRLSign",
+		"detail page should explain why the CRL UI is hidden")
+	_ = srv
+}
+
+func TestImportRoot_NoCRLSign_IndexHidesCRLLinks(t *testing.T) {
+	srv, db := testServer(t)
+	fastSetup(t, srv, db)
+	c := newClient(t, srv)
+	installSession(t, srv, c)
+
+	id := importNoCRLSignRoot(t, c, "No CRLSign Index")
+
+	w := c.get("/")
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	// The row appears (cert.pem link is present)…
+	assert.Contains(t, body, `/certs/`+id+`/cert.pem`)
+	// …but the CRL action links are hidden.
+	assert.NotContains(t, body, `href="/crl/`+id+`.crl"`)
+	assert.NotContains(t, body, `href="/certs/`+id+`/crls"`)
+	_ = srv
+}
+
+func TestRevoke_ChildOfNoCRLSignRoot_RevokesWithoutCRLUpdate(t *testing.T) {
+	srv, db := testServer(t)
+	fastSetup(t, srv, db)
+	c := newClient(t, srv)
+	installSession(t, srv, c)
+
+	rootID := importNoCRLSignRoot(t, c, "No CRLSign Parent")
+
+	// Issue a homepki intermediate under the imported root. The
+	// intermediate inherits cRLSign from homepki's CA template, so its
+	// own CRL works fine — the missing piece is only the parent's.
+	interID := mustIssue(t, c, "/certs/new/intermediate", url.Values{
+		"parent_id":       {rootID},
+		"subject_cn":      {"Child of No-CRLSign Root"},
+		"key_algo":        {"ecdsa"},
+		"key_algo_params": {"P-256"},
+		"validity_days":   {"180"},
+	})
+
+	// Revoke the intermediate. Without the relax, regenerating the
+	// imported root's CRL fails with "issuer must have the crlSign key
+	// usage bit set" — and the handler 500s. With the relax, the
+	// revoke succeeds and the imported root simply has no CRL update.
+	form := url.Values{"reason": {"4"}} // superseded
+	resp := c.postForm("/certs/"+interID+"/revoke", form)
+	require.Equal(t, http.StatusSeeOther, resp.Code,
+		"revoke should succeed even when issuer can't sign CRLs; body=%q", resp.Body.String())
+	assert.Equal(t, "/certs/"+interID, resp.Header().Get("Location"))
+
+	cert, err := store.GetCert(srv.db, interID)
+	require.NoError(t, err)
+	assert.Equal(t, "revoked", cert.Status,
+		"intermediate must be marked revoked even though parent CRL wasn't updated")
+
+	// And no CRL row was written for the imported root.
+	_, err = store.GetLatestCRL(srv.db, rootID)
+	assert.ErrorIs(t, err, store.ErrCRLNotFound)
+}
+
+func TestImportRoot_WithCRLSign_StillGetsInitialCRL(t *testing.T) {
+	// Sanity: the relax must not regress the normal path. A root *with*
+	// cRLSign still gets its initial empty CRL written at import time.
+	srv, db := testServer(t)
+	fastSetup(t, srv, db)
+	c := newClient(t, srv)
+	installSession(t, srv, c)
+
+	certPEM, keyPEM := makeImportableRoot(t, "Normal CRLSign Root")
+	w := c.get("/certs/import/root")
+	form := url.Values{
+		"cert_pem":   {certPEM},
+		"key_pem":    {keyPEM},
+		"form_token": {extractFormToken(t, w.Body.String())},
+	}
+	resp := c.postForm("/certs/import/root", form)
+	require.Equal(t, http.StatusSeeOther, resp.Code)
+	id := strings.TrimPrefix(resp.Header().Get("Location"), "/certs/")
+
+	crl, err := store.GetLatestCRL(srv.db, id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), crl.CRLNumber)
 }
 
