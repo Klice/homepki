@@ -30,6 +30,7 @@ func sampleCert(id string) *Cert {
 		DERCert:           []byte{0x30, 0x82, 0x01},
 		FingerprintSHA256: "deadbeef",
 		Status:            "active",
+		Source:            "issued",
 	}
 }
 

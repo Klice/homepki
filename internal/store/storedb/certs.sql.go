@@ -10,6 +10,55 @@ import (
 	"time"
 )
 
+const getCertByFingerprint = `-- name: GetCertByFingerprint :one
+SELECT id, type, parent_id, serial_number,
+       subject_cn, subject_o, subject_ou, subject_l, subject_st, subject_c,
+       san_dns, san_ip, is_ca, path_len_constraint,
+       key_algo, key_algo_params, key_usage, ext_key_usage,
+       not_before, not_after, der_cert, fingerprint_sha256,
+       status, revoked_at, revocation_reason, replaces_id, replaced_by_id,
+       created_at, source
+FROM certificates
+WHERE fingerprint_sha256 = ?
+`
+
+func (q *Queries) GetCertByFingerprint(ctx context.Context, fingerprintSha256 string) (Certificate, error) {
+	row := q.db.QueryRowContext(ctx, getCertByFingerprint, fingerprintSha256)
+	var i Certificate
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.ParentID,
+		&i.SerialNumber,
+		&i.SubjectCn,
+		&i.SubjectO,
+		&i.SubjectOu,
+		&i.SubjectL,
+		&i.SubjectSt,
+		&i.SubjectC,
+		&i.SanDns,
+		&i.SanIp,
+		&i.IsCa,
+		&i.PathLenConstraint,
+		&i.KeyAlgo,
+		&i.KeyAlgoParams,
+		&i.KeyUsage,
+		&i.ExtKeyUsage,
+		&i.NotBefore,
+		&i.NotAfter,
+		&i.DerCert,
+		&i.FingerprintSha256,
+		&i.Status,
+		&i.RevokedAt,
+		&i.RevocationReason,
+		&i.ReplacesID,
+		&i.ReplacedByID,
+		&i.CreatedAt,
+		&i.Source,
+	)
+	return i, err
+}
+
 const getCertKeyByID = `-- name: GetCertKeyByID :one
 SELECT cert_id, kek_tier, wrapped_dek, dek_nonce, cipher_nonce, ciphertext
 FROM cert_keys
@@ -45,7 +94,8 @@ SELECT id, type, parent_id, serial_number,
        san_dns, san_ip, is_ca, path_len_constraint,
        key_algo, key_algo_params, key_usage, ext_key_usage,
        not_before, not_after, der_cert, fingerprint_sha256,
-       status, revoked_at, revocation_reason, replaces_id, replaced_by_id, created_at
+       status, revoked_at, revocation_reason, replaces_id, replaced_by_id,
+       created_at, source
 FROM certificates
 WHERE id = ?
 `
@@ -82,6 +132,7 @@ func (q *Queries) GetCertificate(ctx context.Context, id string) (Certificate, e
 		&i.ReplacesID,
 		&i.ReplacedByID,
 		&i.CreatedAt,
+		&i.Source,
 	)
 	return i, err
 }
@@ -120,8 +171,8 @@ INSERT INTO certificates (
     san_dns, san_ip, is_ca, path_len_constraint,
     key_algo, key_algo_params, key_usage, ext_key_usage,
     not_before, not_after, der_cert, fingerprint_sha256,
-    status, replaces_id
-) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?)
+    status, replaces_id, source
+) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?,  ?, ?, ?)
 `
 
 type InsertCertificateParams struct {
@@ -149,6 +200,7 @@ type InsertCertificateParams struct {
 	FingerprintSha256 string
 	Status            string
 	ReplacesID        *string
+	Source            string
 }
 
 // Queries against the certificates and cert_keys tables. Backs internal/store/certs.go.
@@ -178,6 +230,7 @@ func (q *Queries) InsertCertificate(ctx context.Context, arg InsertCertificatePa
 		arg.FingerprintSha256,
 		arg.Status,
 		arg.ReplacesID,
+		arg.Source,
 	)
 	return err
 }
