@@ -117,6 +117,14 @@ services:
       # Log format. "json" is friendlier for log shippers; "text" for tailing.
       # CM_LOG_FORMAT: "json"
 
+      # UID/GID the homepki process drops to inside the container. The
+      # entrypoint runs as root, recreates the homepki user at these
+      # IDs, chowns /data, and then exec's the binary as that user.
+      # Defaults to 1000:1000. Set PUID=99 PGID=100 on Unraid so the
+      # appdata share's default ownership Just Works.
+      # PUID: "1000"
+      # PGID: "1000"
+
 volumes:
   homepki-data:
 ```
