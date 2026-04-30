@@ -23,8 +23,21 @@
       {{.View.Type}}
       &middot;
       <span class="pill {{.View.StatusPillClass}}">{{.View.EffectiveStatus}}</span>
+      {{if eq .View.Source "imported"}}
+      &middot;
+      <span class="pill pill-muted">imported</span>
+      {{end}}
     </small>
   </header>
+
+  {{if eq .View.Source "imported"}}
+  <p style="margin: 0.5rem 0 1rem; padding: 0.5rem 0.75rem; background: #fafbfc; border-left: 3px solid var(--pico-muted-border-color); color: var(--pico-muted-color); font-size: 0.85rem;">
+    This certificate was imported. Children issued through homepki get a
+    homepki CRL distribution point automatically; revoking those works
+    end-to-end. The imported root itself carries whatever DP (if any) it
+    was minted with — homepki can't change that without reissuing.
+  </p>
+  {{end}}
 
   <h3 style="font-size: 0.95rem; font-weight: 500;">Subject</h3>
   <dl>

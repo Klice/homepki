@@ -1,0 +1,57 @@
+{{define "title"}}homepki — import root CA{{end}}
+
+{{define "header_actions"}}
+<nav>
+  <ul>
+    <li><span class="pill pill-ok">unlocked</span></li>
+    <li><a href="/">← Back</a></li>
+  </ul>
+</nav>
+{{end}}
+
+{{define "content"}}
+<article>
+  <header><h2 style="margin-bottom: 0.25rem;">Import root CA</h2></header>
+  <p>
+    <small>
+      Register a self-signed root CA you minted elsewhere. homepki seals
+      the private key under the in-memory passphrase like any other CA,
+      and you can issue intermediates and leaves under it normally —
+      those new children get homepki's CRL distribution point baked in,
+      so revocation works for everything issued through homepki going
+      forward. Re-uploading the same cert is a no-op (idempotent on
+      SHA-256 fingerprint).
+    </small>
+  </p>
+
+  {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
+
+  <form method="post" action="/certs/import/root">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="form_token" value="{{.FormToken}}">
+
+    <label>Certificate (PEM)
+      <textarea name="cert_pem" rows="10" required autofocus
+                placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----"
+                style="font-family: var(--pico-font-family-monospace); font-size: 0.82rem;">{{.CertPEM}}</textarea>
+      <small>
+        Exactly one self-signed CERTIFICATE block. Subject must equal
+        Issuer and the signature must verify under the cert's own key.
+      </small>
+    </label>
+
+    <label>Private key (PKCS#8 PEM)
+      <textarea name="key_pem" rows="10" required
+                placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----"
+                style="font-family: var(--pico-font-family-monospace); font-size: 0.82rem;">{{.KeyPEM}}</textarea>
+      <small>
+        PKCS#8 only. If you have an "RSA PRIVATE KEY" or "EC PRIVATE KEY"
+        block, convert it first:
+        <code>openssl pkcs8 -topk8 -nocrypt -in key.pem -out key.pkcs8.pem</code>.
+      </small>
+    </label>
+
+    <button type="submit" style="margin-top: 0.5rem;">Import root</button>
+  </form>
+</article>
+{{end}}
