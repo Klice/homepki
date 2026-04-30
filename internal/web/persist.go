@@ -205,6 +205,147 @@ func (s *Server) loadSigner(parentID string) (*pki.Signer, *store.Cert, error) {
 	return &pki.Signer{Cert: parsedCert, Key: signerKey}, parentCert, nil
 }
 
+// persistImportedRoot is the import-flow analogue of the CA branch of
+// persistIssued: takes a pre-existing self-signed root cert (DER + parsed)
+// and its private key, seals the key under the in-memory KEK, and inserts
+// the cert + key + initial CRL atomically with the form token marked
+// used. Returns the cert's id.
+//
+// Idempotent on the cert's SHA-256 fingerprint: re-uploading the same
+// cert resolves to the same id without inserting a duplicate. The form
+// token is still marked used pointing at the existing cert's URL so the
+// stale-form path doesn't fire on a refresh-and-resubmit.
+//
+// keyAlgo / keyAlgoParams describe the cert's public key (the operator
+// brings the keypair, we don't generate one). KeySpec is recreated here
+// for storage parity with persistIssued.
+func (s *Server) persistImportedRoot(certDER []byte, cert *x509.Certificate, key stdcrypto.Signer, keyAlgo, keyAlgoParams, formToken string) (string, error) {
+	fp := sha256.Sum256(certDER)
+	fpHex := hex.EncodeToString(fp[:])
+
+	// Idempotency: same cert already in the DB → reuse the id, mark
+	// the token used pointing at it, return.
+	if existing, err := store.GetCertByFingerprint(s.db, fpHex); err == nil {
+		resultURL := "/certs/" + existing.ID
+		// Best-effort token-mark — already-used tokens are fine, the
+		// caller will redirect to resultURL either way.
+		_ = store.MarkIdemTokenUsed(s.db, formToken, resultURL)
+		return existing.ID, nil
+	} else if !errors.Is(err, store.ErrCertNotFound) {
+		return "", fmt.Errorf("persistImportedRoot: lookup by fingerprint: %w", err)
+	}
+
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return "", fmt.Errorf("persistImportedRoot: marshal pkcs8: %w", err)
+	}
+	defer crypto.Zero(pkcs8)
+
+	id := store.NewCertID()
+
+	var sealed *crypto.SealedPrivateKey
+	if err := s.keystore.With(func(kek []byte) error {
+		var serr error
+		sealed, serr = crypto.SealPrivateKey(kek, id, pkcs8)
+		return serr
+	}); err != nil {
+		return "", fmt.Errorf("persistImportedRoot: seal: %w", err)
+	}
+
+	storeCert := certFromImportedRoot(id, fpHex, certDER, cert, keyAlgo, keyAlgoParams)
+	storeKey := &store.CertKey{
+		CertID:      id,
+		KEKTier:     "main",
+		WrappedDEK:  sealed.WrappedDEK,
+		DEKNonce:    sealed.DEKNonce,
+		CipherNonce: sealed.CipherNonce,
+		Ciphertext:  sealed.Ciphertext,
+	}
+
+	// Initial CRL signed by the imported key. Same shape as the
+	// CA-issuance path: lets /crl/{id}.crl return 200 immediately
+	// instead of 404 until the first revocation.
+	initialCRL, err := buildInitialCRLFromKey(id, cert, key)
+	if err != nil {
+		return "", fmt.Errorf("persistImportedRoot: initial CRL: %w", err)
+	}
+
+	resultURL := "/certs/" + id
+	if err := store.IssueCertWithToken(s.db, storeCert, storeKey, initialCRL, formToken, resultURL); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// buildInitialCRLFromKey is buildInitialCRL but takes the parsed cert +
+// signer directly, since import doesn't have a pki.Issued struct.
+func buildInitialCRLFromKey(certID string, cert *x509.Certificate, key stdcrypto.Signer) (*store.CRL, error) {
+	now := time.Now()
+	thisUpdate := now.Add(-crlClockSkewMargin)
+	nextUpdate := now.Add(crlNextUpdateWindow)
+	der, err := pki.CreateCRL(pki.CRLRequest{
+		Issuer:     &pki.Signer{Cert: cert, Key: key},
+		Number:     big.NewInt(1),
+		ThisUpdate: thisUpdate,
+		NextUpdate: nextUpdate,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &store.CRL{
+		IssuerCertID: certID,
+		CRLNumber:    1,
+		ThisUpdate:   thisUpdate,
+		NextUpdate:   nextUpdate,
+		DER:          der,
+	}, nil
+}
+
+// certFromImportedRoot maps a parsed self-signed cert into a store.Cert
+// ready for insertion. Mirrors certFromIssued but works from primitives
+// (no pki.Issued / pki.KeySpec wrapper) and stamps Source = "imported".
+func certFromImportedRoot(id, fpHex string, certDER []byte, c *x509.Certificate, keyAlgo, keyAlgoParams string) *store.Cert {
+	sanDNS := slices.Clone(c.DNSNames)
+	sanIPs := make([]string, 0, len(c.IPAddresses))
+	for _, ip := range c.IPAddresses {
+		sanIPs = append(sanIPs, ip.String())
+	}
+
+	var pathLen *int
+	if c.MaxPathLenZero {
+		v := 0
+		pathLen = &v
+	} else if c.MaxPathLen > 0 {
+		v := c.MaxPathLen
+		pathLen = &v
+	}
+
+	return &store.Cert{
+		ID:                id,
+		Type:              "root_ca",
+		ParentID:          nil, // self-signed — no parent
+		SerialNumber:      c.SerialNumber.Text(16),
+		SubjectCN:         c.Subject.CommonName,
+		SubjectO:          firstOrEmpty(c.Subject.Organization),
+		SubjectOU:         firstOrEmpty(c.Subject.OrganizationalUnit),
+		SubjectL:          firstOrEmpty(c.Subject.Locality),
+		SubjectST:         firstOrEmpty(c.Subject.Province),
+		SubjectC:          firstOrEmpty(c.Subject.Country),
+		SANDNS:            sanDNS,
+		SANIPs:            sanIPs,
+		IsCA:              c.IsCA,
+		PathLen:           pathLen,
+		KeyAlgo:           keyAlgo,
+		KeyAlgoParams:     keyAlgoParams,
+		NotBefore:         c.NotBefore,
+		NotAfter:          c.NotAfter,
+		DERCert:           certDER,
+		FingerprintSHA256: fpHex,
+		Status:            "active",
+		Source:            "imported",
+	}
+}
+
 // certFromIssued maps the parsed pki.Issued struct (and the input keySpec)
 // into a store.Cert ready for insertion.
 func certFromIssued(id, certType string, parentID *string, issued *pki.Issued, keySpec pki.KeySpec) *store.Cert {

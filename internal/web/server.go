@@ -122,6 +122,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /certs/new/intermediate", s.handleIssueIntermediatePost)
 	s.mux.HandleFunc("GET /certs/new/leaf", s.handleIssueLeafGet)
 	s.mux.HandleFunc("POST /certs/new/leaf", s.handleIssueLeafPost)
+	s.mux.HandleFunc("GET /certs/import/root", s.handleImportRootGet)
+	s.mux.HandleFunc("POST /certs/import/root", s.handleImportRootPost)
 	s.mux.HandleFunc("POST /certs/{id}/revoke", s.handleRevoke)
 	s.mux.HandleFunc("GET /certs/{id}/rotate", s.handleRotateGet)
 	s.mux.HandleFunc("POST /certs/{id}/rotate", s.handleRotatePost)
