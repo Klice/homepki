@@ -33,14 +33,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # --- runtime stage ----------------------------------------------------------
 FROM alpine:${ALPINE_VERSION}
 
-RUN apk add --no-cache ca-certificates wget tzdata sqlite && \
+RUN apk add --no-cache ca-certificates wget tzdata sqlite su-exec && \
     addgroup -S -g 1000 homepki && \
     adduser  -S -D -u 1000 -G homepki -h /home/homepki homepki && \
     mkdir -p /data && chown homepki:homepki /data
 
 COPY --from=build /out/homepki /usr/local/bin/homepki
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER homepki
+# Entrypoint runs as root so it can chown /data and recreate the
+# homepki user at the host-supplied PUID/PGID before dropping
+# privileges via su-exec. Pass --user on the docker command to
+# bypass that path entirely.
 WORKDIR /data
 VOLUME ["/data"]
 
@@ -48,9 +53,11 @@ EXPOSE 8080
 
 ENV CM_LISTEN_ADDR=:8080 \
     CM_DATA_DIR=/data \
-    CM_LOG_FORMAT=json
+    CM_LOG_FORMAT=json \
+    PUID=1000 \
+    PGID=1000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1 || exit 1
 
-ENTRYPOINT ["/usr/local/bin/homepki"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
