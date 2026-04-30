@@ -460,6 +460,90 @@ test_crl_history() {
     assert_eq "leaf history page → 404"      "$(get_status "/certs/${LEAF_ID}/crls")"   "404"
 }
 
+test_import_root() {
+    echo "==> Import root CA"
+
+    # Mint a self-signed root + matching key in PKCS#8 PEM.
+    local imp_dir="${WORK_DIR}/import"
+    mkdir -p "${imp_dir}"
+    openssl req \
+        -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+        -days 365 \
+        -subj "/CN=Smoke Imported Root" \
+        -addext "basicConstraints=critical,CA:TRUE" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign" \
+        -keyout "${imp_dir}/imp.key" \
+        -out    "${imp_dir}/imp.crt" \
+        2>/dev/null
+    # openssl req with -newkey ec emits PKCS#8 already, but normalize
+    # to be explicit.
+    openssl pkcs8 -topk8 -nocrypt -in "${imp_dir}/imp.key" -out "${imp_dir}/imp.pkcs8.key" 2>/dev/null
+    local cert_pem key_pem
+    cert_pem=$(cat "${imp_dir}/imp.crt")
+    key_pem=$(cat "${imp_dir}/imp.pkcs8.key")
+
+    # GET form, POST cert + key, expect 303 to /certs/{id}.
+    local html="${WORK_DIR}/import-form.html"
+    get_page /certs/import/root "${html}"
+    local csrf form_token status loc
+    csrf=$(extract_attr csrf_token "${html}")
+    form_token=$(extract_attr form_token "${html}")
+
+    post_form /certs/import/root status loc \
+        "csrf_token=${csrf}" "form_token=${form_token}" \
+        "cert_pem=${cert_pem}" "key_pem=${key_pem}"
+    assert_eq "import → 303" "${status}" "303"
+    assert_contains "import Location" "${loc}" "/certs/"
+    local import_id="${loc#/certs/}"
+    pass "imported id ${import_id}"
+
+    # Index lists the imported root with the badge.
+    get_page "/" "${WORK_DIR}/index-after-import.html"
+    local index_body
+    index_body=$(cat "${WORK_DIR}/index-after-import.html")
+    assert_contains "index lists imported CN" "${index_body}" "Smoke Imported Root"
+
+    # Detail page shows the imported callout + badge.
+    get_page "/certs/${import_id}" "${WORK_DIR}/imported-detail.html"
+    local detail_body
+    detail_body=$(cat "${WORK_DIR}/imported-detail.html")
+    assert_contains "detail shows imported pill" "${detail_body}" "imported"
+    assert_contains "detail shows callout" "${detail_body}" "This certificate was imported"
+
+    # Initial CRL is present and parses.
+    local crl_status
+    crl_status=$(get_with_headers "/crl/${import_id}.crl" "${imp_dir}/imp.crl.der")
+    assert_eq "initial CRL → 200" "${crl_status}" "200"
+    if openssl crl -inform DER -in "${imp_dir}/imp.crl.der" -noout 2>/dev/null; then
+        pass "imported root initial CRL parses"
+    else
+        fail "imported root initial CRL does not parse as DER"
+    fi
+
+    # Idempotency: re-uploading the same cert resolves to the same id.
+    get_page /certs/import/root "${html}"
+    csrf=$(extract_attr csrf_token "${html}")
+    form_token=$(extract_attr form_token "${html}")
+    local replay_status replay_loc
+    post_form /certs/import/root replay_status replay_loc \
+        "csrf_token=${csrf}" "form_token=${form_token}" \
+        "cert_pem=${cert_pem}" "key_pem=${key_pem}"
+    assert_eq "duplicate import → 303" "${replay_status}" "303"
+    assert_eq "duplicate import → same id" "${replay_loc}" "${loc}"
+
+    # Negative: a leaf cert (the existing smoke leaf) should fail to import as a root.
+    local leaf_pem
+    leaf_pem=$(cat "${WORK_DIR}/leaf.crt")
+    get_page /certs/import/root "${html}"
+    csrf=$(extract_attr csrf_token "${html}")
+    form_token=$(extract_attr form_token "${html}")
+    local bad_status bad_loc
+    post_form /certs/import/root bad_status bad_loc \
+        "csrf_token=${csrf}" "form_token=${form_token}" \
+        "cert_pem=${leaf_pem}" "key_pem=${key_pem}"
+    assert_eq "leaf-as-root → 400" "${bad_status}" "400"
+}
+
 test_passphrase_rotate() {
     echo "==> Rotate passphrase"
     local new_pp="rotated-passphrase-${RANDOM}-abc"
@@ -554,6 +638,7 @@ main() {
     test_bundle_p12
     test_deploy
     test_crl_history
+    test_import_root
     test_passphrase_rotate
     test_lock_state
 
