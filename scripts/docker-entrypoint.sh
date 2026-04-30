@@ -25,16 +25,28 @@ fi
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
 
-# Recreate the homepki user/group at the requested IDs. Cheap on every
-# start and avoids needing the `shadow` package just for usermod.
-deluser  homepki 2>/dev/null || true
-delgroup homepki 2>/dev/null || true
-addgroup -S -g "$PGID" homepki
-adduser  -S -D -u "$PUID" -G homepki -h /home/homepki homepki
+# Ensure a group exists at PGID. Reuse one if it's already provisioned
+# at that ID — Alpine's base image already has `users` at GID 100,
+# which is exactly what Unraid asks for, and `addgroup -S -g 100` would
+# otherwise fail with "gid '100' in use". Only mint a fresh group when
+# nothing claims the GID yet, evicting any stale `homepki` group from
+# a previous run or the build-time provisioning.
+if ! getent group "$PGID" >/dev/null; then
+    delgroup homepki 2>/dev/null || true
+    addgroup -S -g "$PGID" homepki
+fi
+group_name=$(getent group "$PGID" | cut -d: -f1)
+
+# Same shape for the user: reuse an existing UID, or mint one and
+# evict the stale `homepki` entry first so the name is free.
+if ! getent passwd "$PUID" >/dev/null; then
+    deluser homepki 2>/dev/null || true
+    adduser -S -D -u "$PUID" -G "$group_name" -h /home/homepki homepki
+fi
 
 # Bind-mounted /data on Unraid is pre-created at PUID:PGID by the host;
 # elsewhere it may be a fresh named volume owned by root. Either way,
-# align ownership so the homepki user can write its SQLite DB.
-chown -R homepki:homepki /data
+# align ownership so the runtime user can write its SQLite DB.
+chown -R "$PUID:$PGID" /data
 
-exec su-exec homepki:homepki "$@"
+exec su-exec "$PUID:$PGID" "$@"
