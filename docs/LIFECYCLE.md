@@ -560,6 +560,75 @@ No GC in v1.
 
 ---
 
+## 7. Imports
+
+Roots minted offline or by another tool can be registered inside homepki
+through `POST /certs/import/root` (HTTP wire form: [API.md §6.7](API.md#67-post-certsimportroot)).
+Scope is intentionally roots only.
+
+### 7.1 What gets stored
+
+The import flow takes a self-signed cert (PEM) and its matching private
+key (PKCS#8 PEM). The key is sealed under the in-memory KEK with the
+same two-tier wrap as homepki-generated keys (see §2.1) — same AAD
+binding, same column layout in `cert_keys`. The cert row carries
+`source = 'imported'` to distinguish it from homepki-issued rows; the
+dashboard surfaces an "imported" pill so the operator can tell at a
+glance.
+
+### 7.2 What's enforced at import time
+
+- Subject DN must equal Issuer DN (self-signed).
+- Signature must verify under the cert's own public key.
+- `BasicConstraints CA=true`.
+- Public key must match the supplied private key.
+- PKCS#8 only for the key — legacy `RSA PRIVATE KEY` /
+  `EC PRIVATE KEY` blocks are rejected with a hint pointing at
+  `openssl pkcs8 -topk8`.
+- Expired roots are accepted but flagged on the dashboard via the
+  derived `expired` status (§5.5).
+
+Re-uploading the same cert is idempotent: the handler resolves to the
+existing row (matched by SHA-256 fingerprint) instead of inserting a
+duplicate.
+
+### 7.3 What happens after import
+
+The imported row behaves like any homepki-issued CA:
+
+- Children issued via `POST /certs/new/{intermediate,leaf}` under the
+  imported parent are **homepki-signed**, get homepki's CRL
+  Distribution Point baked in (§6.6), and revoke / CRL-regen flows
+  work end to end.
+- An empty initial CRL signed by the imported key is written at
+  import time so `GET /crl/{id}.crl` returns 200 immediately
+  (mirrors §6.2). The imported cert must therefore have `cRLSign` in
+  its KeyUsage extension.
+- The imported root itself can be rotated; the successor is a
+  homepki-issued cert with the standard `replaces_id` / `replaced_by_id`
+  link. Over time, rotation naturally migrates the install away from
+  imported state.
+
+### 7.4 What homepki cannot do for imported roots
+
+The CRL DP extension in any cert is part of the signed body; we can't
+change it without invalidating the issuer's signature. So:
+
+- The imported root carries whatever DP it was minted with (often none
+  for self-signed roots; sometimes one pointing at the original issuer
+  infrastructure). Homepki doesn't touch it.
+- Pre-existing children of the imported root that were issued
+  *before* the import — not visible to homepki — keep their original
+  DPs. Homepki's CRL is only consulted for those children if a
+  verifier is configured out-of-band.
+
+This is why import is roots-only in v1: importing leaves or
+intermediates would inherit a baked-in DP that points away from
+homepki, defeating the revocation flow. Roots avoid the problem
+because new children flow through homepki's signing path.
+
+---
+
 ## Open decisions
 
 1. **`CM_PASSPHRASE` doc tone** (§1.5) — should the README warn loudly that

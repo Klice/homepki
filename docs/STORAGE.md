@@ -204,6 +204,7 @@ revoked, superseded, expired — never deleted in v1).
 | `replaces_id`           | TEXT NULL       | FK → `certificates.id`; rotation chain |
 | `replaced_by_id`        | TEXT NULL       | FK → `certificates.id`; rotation chain |
 | `created_at`            | DATETIME        |       |
+| `source`                | TEXT            | `issued` (homepki minted the cert) \| `imported` (operator brought their own root via `POST /certs/import/root`). Default `issued`. |
 
 **Constraints:**
 

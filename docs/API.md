@@ -200,6 +200,8 @@ Single canonical list. Per-endpoint specifics in §4 onward.
 | POST     | `/certs/new/intermediate`           | issue an intermediate CA               | kek        |
 | GET      | `/certs/new/leaf`                   | issue-leaf form                        | session    |
 | POST     | `/certs/new/leaf`                   | issue a leaf cert                      | kek        |
+| GET      | `/certs/import/root`                | import-root form                       | kek        |
+| POST     | `/certs/import/root`                | import an existing self-signed root CA | kek        |
 | GET      | `/certs/{id}/rotate`                | rotation form (pre-filled)             | session    |
 | POST     | `/certs/{id}/rotate`                | issue successor; mark old superseded   | kek        |
 | POST     | `/certs/{id}/revoke`                | revoke with reason code                | kek        |
@@ -403,6 +405,55 @@ the CRL. Submitting a *different* reason for an already-revoked cert is
 not an error — the original reason is preserved (a once-revoked cert has
 one canonical revocation event, and changing the reason later would make
 the CRL history inconsistent).
+
+### 6.7 `POST /certs/import/root`
+
+Register an existing self-signed root CA — minted offline or by another
+tool — inside homepki, including its private key. After import the row
+behaves like any other CA: children can be issued under it, it can be
+rotated and revoked, and its key is sealed under the in-memory KEK like
+any homepki-generated cert. The `source` column distinguishes it from
+homepki-issued rows; the dashboard surfaces an "imported" pill.
+
+Scope is roots only. Importing intermediates and leaves is intentionally
+not supported in v1 — those carry a CRL Distribution Point baked in by
+their original issuer that homepki can't change without reissuing the
+cert. Once a root is imported, new children issued through homepki get
+a homepki CRL DP automatically, so the distribution-point problem fades
+naturally for everything new.
+
+POST form:
+
+| field          | constraints                                                |
+| -------------- | ---------------------------------------------------------- |
+| `cert_pem`     | required; exactly one `CERTIFICATE` PEM block, self-signed CA |
+| `key_pem`      | required; one `PRIVATE KEY` (PKCS#8) block matching the cert |
+| `form_token`   | required; from the rendered form (§2.7.1)                  |
+| `csrf_token`   | required                                                   |
+
+Validation, in order:
+
+1. Parse exactly one `CERTIFICATE` block.
+2. Parse exactly one `PRIVATE KEY` block. Legacy `RSA PRIVATE KEY` and
+   `EC PRIVATE KEY` blocks are rejected with a hint pointing at
+   `openssl pkcs8 -topk8` to convert them.
+3. The cert must have `BasicConstraints CA=true`, `Subject == Issuer`,
+   and the signature must verify under its own public key.
+4. The cert's public key must match the supplied private key.
+
+Failures re-render the form with **400** and the operator's pasted PEM
+preserved.
+
+Form-token gated (§2.7.1) **and** idempotent on the cert's SHA-256
+fingerprint: re-uploading the same root resolves to the existing row's
+URL with **303 → `/certs/{id}`** instead of inserting a duplicate. The
+form-token replay path returns the same redirect as the original
+submission.
+
+After successful insert: an empty initial CRL signed by the imported
+key is written so `GET /crl/{id}.crl` returns 200 immediately. Note: the
+imported cert must have `cRLSign` in its KeyUsage extension for this to
+work (the standard for any CA cert).
 
 ---
 
