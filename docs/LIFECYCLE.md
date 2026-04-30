@@ -602,8 +602,11 @@ The imported row behaves like any homepki-issued CA:
   work end to end.
 - An empty initial CRL signed by the imported key is written at
   import time so `GET /crl/{id}.crl` returns 200 immediately
-  (mirrors §6.2). The imported cert must therefore have `cRLSign` in
-  its KeyUsage extension.
+  (mirrors §6.2) — but only when the imported cert carries the
+  `cRLSign` KeyUsage bit. Older roots minted without `cRLSign` are
+  still accepted (see §7.5); they simply have no CRL endpoint, and
+  revoking children under them records the transition without a CRL
+  update (the same out-of-band model as root revocation in §5.4).
 - The imported root itself can be rotated; the successor is a
   homepki-issued cert with the standard `replaces_id` / `replaced_by_id`
   link. Over time, rotation naturally migrates the install away from
@@ -626,6 +629,34 @@ This is why import is roots-only in v1: importing leaves or
 intermediates would inherit a baked-in DP that points away from
 homepki, defeating the revocation flow. Roots avoid the problem
 because new children flow through homepki's signing path.
+
+### 7.5 Imported roots without `cRLSign`
+
+RFC 5280 §4.2.1.3 requires the `cRLSign` KeyUsage bit on any cert that
+signs a CRL — and Go's `x509.CreateRevocationList` enforces it. Older
+or constrained PKIs sometimes mint roots without that bit; reminting
+the cert to add it would, by definition, reissue the root and defeat
+the point of import (the operator brought a cert they specifically
+want to keep, not a placeholder for a fresh one).
+
+Homepki accepts these roots and adapts the surrounding flows:
+
+- **Import** writes the cert + sealed key but **skips the initial CRL
+  row**. `GET /crl/{id}.crl` returns 404 — there is no CRL to serve,
+  and the operator already accepted that limitation by importing a
+  cert without `cRLSign`.
+- **The dashboard hides the CRL download / history links** for these
+  CAs (both on the index row and the detail page), and the detail
+  page surfaces a short note explaining why.
+- **Revoking a child** of such a CA marks the child `revoked` in the
+  database and logs that the parent's CRL was not regenerated — the
+  HTTP response is still a normal 303 to the child's detail page.
+  Revocation distribution is the operator's responsibility (typically
+  trust-store removal, same as for root revocation per §5.4).
+- **Rotation** of the imported root produces a homepki-issued
+  successor with `cRLSign` set and a working CRL endpoint, so the
+  steady state migrates away from the no-CRL constraint as soon as
+  the operator chooses to rotate.
 
 ---
 
