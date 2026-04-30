@@ -77,8 +77,10 @@
         <a href="/certs/{{.ID}}">view</a>
         <span class="sep">|</span>
         <a href="/certs/{{.ID}}/cert.pem">cert.pem</a>
+        {{if .CanSignCRL}}
         <a href="/crl/{{.ID}}.crl">crl</a>
         <a href="/certs/{{.ID}}/crls">history</a>
+        {{end}}
         {{if eq .Status "active"}}
         <span class="sep">|</span>
         <a href="/certs/{{.ID}}/rotate">rotate</a>

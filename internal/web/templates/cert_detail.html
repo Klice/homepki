@@ -143,12 +143,12 @@
     {{if eq .View.Type "leaf"}}
     <li><a href="/certs/{{.View.ID}}/fullchain.pem">fullchain.pem</a> <small>— this cert followed by the chain</small></li>
     {{end}}
-    {{if .View.IsCA}}
+    {{if .View.CanSignCRL}}
     <li><a href="/crl/{{.View.ID}}.crl">latest.crl</a> <small>— current CRL (also at the public CRL distribution URL baked into issued certs)</small></li>
     {{end}}
   </ul>
 
-  {{if .View.IsCA}}
+  {{if .View.CanSignCRL}}
   <h3 style="font-size: 0.95rem; font-weight: 500;">CRL history</h3>
   <p>
     <a href="/certs/{{.View.ID}}/crls">View every signed CRL snapshot →</a>
@@ -156,6 +156,15 @@
       Each revocation regenerates the CRL with a new monotonic number; old
       snapshots are kept so historical verification still works.
     </small>
+  </p>
+  {{else if .View.IsCA}}
+  <h3 style="font-size: 0.95rem; font-weight: 500;">CRL</h3>
+  <p style="color: var(--pico-muted-color); font-size: 0.9rem;">
+    This CA's certificate does not carry the <code>cRLSign</code> KeyUsage bit,
+    so homepki cannot publish a CRL for it. Children revoked under this CA
+    are still recorded in the database, but their revocation cannot be
+    distributed via CRL — manage that out-of-band (e.g. via trust-store
+    removal) until this CA is rotated to a homepki-issued successor.
   </p>
   {{end}}
 
