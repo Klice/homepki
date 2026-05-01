@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"slices"
 	"time"
@@ -74,7 +75,14 @@ func (s *Server) persistIssued(certType string, parentID *string, issued *pki.Is
 	if err := store.IssueCertWithToken(s.db, cert, key, initialCRL, formToken, resultURL); err != nil {
 		return "", err
 	}
+	s.snapshotCRLBaseURLOnFirstIssuance()
 	return id, nil
+}
+
+func (s *Server) snapshotCRLBaseURLOnFirstIssuance() {
+	if _, err := store.SetSettingIfMissing(s.db, store.SettingCRLBaseURL, []byte(s.cfg.CRLBaseURL)); err != nil {
+		slog.Warn("snapshot CRL_BASE_URL: insert", "err", err)
+	}
 }
 
 // buildInitialCRL produces the empty CRL written alongside a freshly-issued
@@ -152,6 +160,7 @@ func (s *Server) persistRotation(certType string, parentID *string, oldID string
 	if err := store.IssueRotationWithToken(s.db, cert, key, initialCRL, oldID, formToken, resultURL); err != nil {
 		return "", err
 	}
+	s.snapshotCRLBaseURLOnFirstIssuance()
 	return id, nil
 }
 
@@ -281,6 +290,7 @@ func (s *Server) persistImportedRoot(certDER []byte, cert *x509.Certificate, key
 	if err := store.IssueCertWithToken(s.db, storeCert, storeKey, initialCRL, formToken, resultURL); err != nil {
 		return "", err
 	}
+	s.snapshotCRLBaseURLOnFirstIssuance()
 	return id, nil
 }
 

@@ -3,8 +3,10 @@ package web
 import (
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 
 	"github.com/Klice/homepki/internal/config"
 	"github.com/Klice/homepki/internal/crypto"
+	"github.com/Klice/homepki/internal/store"
 )
 
 // Server wires the HTTP mux, configuration, database, keystore, and parsed
@@ -70,7 +73,24 @@ func New(cfg config.Config, db *sql.DB, keystore *crypto.Keystore) (*Server, err
 		csrf.Secure(false),
 	)
 	s.handler = plaintextHTTPDetect(csrfMW(s.mux))
+	s.checkCRLBaseURLDrift()
 	return s, nil
+}
+
+func (s *Server) checkCRLBaseURLDrift() {
+	snap, err := store.GetSetting(s.db, store.SettingCRLBaseURL)
+	if errors.Is(err, store.ErrSettingNotFound) {
+		return
+	}
+	if err != nil {
+		slog.Warn("crl_base_url drift check: read snapshot", "err", err)
+		return
+	}
+	stored := string(snap)
+	if stored != s.cfg.CRLBaseURL {
+		slog.Warn("CRL_BASE_URL changed since first issuance — already-issued certs reference the original URL",
+			"snapshot", stored, "env", s.cfg.CRLBaseURL)
+	}
 }
 
 // plaintextHTTPDetect tells gorilla/csrf when a request actually arrived over
