@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,7 +17,53 @@ func fastKDFParams() KDFParams {
 
 func TestDefaultKDFParams(t *testing.T) {
 	p := DefaultKDFParams()
-	assert.Equal(t, KDFParams{Time: 3, Memory: 64 * 1024, Threads: 2, KeyLen: 32}, p)
+	assert.Equal(t, KDFParams{
+		Time: 3, Memory: 64 * 1024, Threads: 2, KeyLen: 32,
+		Version: Argon2idV13,
+	}, p)
+}
+
+func TestKDFParams_JSONRoundTripIncludesVersion(t *testing.T) {
+	p := DefaultKDFParams()
+	b, err := json.Marshal(p)
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"version":19`,
+		"persisted JSON must carry the Argon2id version so a future homepki version can refuse rows it can't safely re-derive")
+
+	var got KDFParams
+	require.NoError(t, json.Unmarshal(b, &got))
+	assert.Equal(t, p, got)
+}
+
+func TestKDFParams_JSONLegacyRowsHaveNoVersion(t *testing.T) {
+	// Pre-version-field rows decode to Version=0; DeriveKEK must
+	// treat that as Argon2idV13 so existing installs keep working
+	// after upgrade.
+	legacy := []byte(`{"time":3,"memory":65536,"threads":2,"key_len":32}`)
+	var p KDFParams
+	require.NoError(t, json.Unmarshal(legacy, &p))
+	assert.Equal(t, uint32(0), p.Version)
+}
+
+func TestDeriveKEK_AcceptsLegacyVersionZero(t *testing.T) {
+	p := fastKDFParams() // Version is unset → 0
+	_, err := DeriveKEK([]byte("pw"), []byte("0123456789abcdef"), p)
+	require.NoError(t, err, "legacy rows without version field must still derive")
+}
+
+func TestDeriveKEK_AcceptsExplicitV13(t *testing.T) {
+	p := fastKDFParams()
+	p.Version = Argon2idV13
+	_, err := DeriveKEK([]byte("pw"), []byte("0123456789abcdef"), p)
+	require.NoError(t, err)
+}
+
+func TestDeriveKEK_RejectsUnknownVersion(t *testing.T) {
+	p := fastKDFParams()
+	p.Version = 0x14 // hypothetical future version
+	_, err := DeriveKEK([]byte("pw"), []byte("0123456789abcdef"), p)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "Argon2id version")
 }
 
 func TestNewSalt(t *testing.T) {
