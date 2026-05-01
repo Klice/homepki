@@ -445,10 +445,6 @@ func (s *Server) parentChoicesForLeaf() ([]parentChoice, error) {
 // renderIssueError re-renders the named issue template with the form data
 // preserved (so the operator doesn't have to re-fill everything) and an
 // error message. Sets HTTP 400.
-//
-// Per API.md §10: htmx callers get just the form fragment back so the
-// page surrounding the form (header, intro paragraph) doesn't reflow;
-// non-htmx callers get a full page render as before.
 func (s *Server) renderIssueError(w http.ResponseWriter, r *http.Request, name string, form issueViewData, formToken, msg string, choices []parentChoice) {
 	form.CSRFToken = CSRFToken(r)
 	form.FormToken = formToken
