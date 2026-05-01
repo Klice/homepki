@@ -80,8 +80,6 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		TotalLeaves:      len(leafViews),
 	}
 
-	// Per API.md §10: htmx requests get the swappable region back; the
-	// rest of the page (chrome, scripts) stays put. Same URL serves both.
 	if IsHXRequest(r) {
 		s.renderFragment(w, "index", "index_fragment", data)
 		return

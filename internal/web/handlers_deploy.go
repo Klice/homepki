@@ -320,12 +320,6 @@ func (s *Server) handleDeployRunAll(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/certs/"+cert.ID, http.StatusSeeOther)
 }
 
-// renderDeployTargetsFragment re-runs the deploy-targets section of the
-// cert detail page after a mutation (run, runAll, delete) so htmx swaps
-// the section in place. The data shape exactly matches what
-// handleCertDetail feeds to cert_detail's `deploy_targets_fragment`
-// block — fewer fields than the full page, but enough for the fragment
-// to render.
 func (s *Server) renderDeployTargetsFragment(w http.ResponseWriter, r *http.Request, cert *store.Cert) {
 	targets, err := store.ListDeployTargets(s.db, cert.ID)
 	if err != nil {

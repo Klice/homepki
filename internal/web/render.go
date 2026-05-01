@@ -65,14 +65,9 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 }
 
 // renderFragment writes a single named block from the page template
-// without the surrounding layout. Used to serve htmx swaps at the same
-// URL the page is otherwise rendered at — handlers branch on
-// IsHXRequest and call this for the fragment branch (per API.md §10).
-//
-// Each fragment-aware page template defines a {{define "<name>"}}
-// block that renders just the swappable region. Cache-Control is the
-// same as the full-page render — fragments are still HTML, still not
-// cacheable.
+// without the surrounding layout. Each fragment-aware page template
+// defines a {{define "<name>"}} block that renders just the
+// swappable region.
 func (s *Server) renderFragment(w http.ResponseWriter, page, block string, data any) {
 	t, ok := s.templates[page]
 	if !ok {

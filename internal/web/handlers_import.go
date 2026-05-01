@@ -114,8 +114,7 @@ func (s *Server) handleImportRootPost(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderImportError re-renders the form with a 400 + the operator's
-// pasted PEM preserved. htmx callers get just the form fragment back
-// per API.md §10.
+// pasted PEM preserved.
 func (s *Server) renderImportError(w http.ResponseWriter, r *http.Request, formToken, certPEM, keyPEM, msg string) {
 	view := importViewData{
 		CSRFToken: CSRFToken(r),
