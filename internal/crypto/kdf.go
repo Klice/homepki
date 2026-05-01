@@ -3,12 +3,20 @@ package crypto
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 
 	"golang.org/x/crypto/argon2"
 )
 
 // SaltLen is the length of the KDF salt in bytes.
 const SaltLen = 16
+
+// Argon2idV13 is the only Argon2id version we accept. Older 0x10
+// (v1.0) had a known cryptanalytic weakness; no v1.4 has shipped.
+// Persisted alongside the other KDF params so a future version of
+// homepki can detect a row written by an even-newer version it
+// doesn't support, instead of silently mis-deriving the KEK.
+const Argon2idV13 uint32 = 0x13
 
 // KDFParams capture the Argon2id parameters used to derive a KEK from a
 // passphrase. They are persisted alongside the salt so that defaults can
@@ -17,20 +25,22 @@ const SaltLen = 16
 //
 // See LIFECYCLE.md §1.1 for the v1 defaults.
 type KDFParams struct {
-	Time    uint32 `json:"time"`    // iterations
-	Memory  uint32 `json:"memory"`  // KiB
-	Threads uint8  `json:"threads"` // parallelism
-	KeyLen  uint32 `json:"key_len"` // output length in bytes
+	Time    uint32 `json:"time"`              // iterations
+	Memory  uint32 `json:"memory"`            // KiB
+	Threads uint8  `json:"threads"`           // parallelism
+	KeyLen  uint32 `json:"key_len"`           // output length in bytes
+	Version uint32 `json:"version,omitempty"` // Argon2id algorithm version; absent on legacy rows means Argon2idV13
 }
 
 // DefaultKDFParams returns the v1 Argon2id defaults: time=3, memory=64 MiB,
-// threads=2, key_len=32.
+// threads=2, key_len=32, version=0x13.
 func DefaultKDFParams() KDFParams {
 	return KDFParams{
 		Time:    3,
 		Memory:  64 * 1024,
 		Threads: 2,
 		KeyLen:  32,
+		Version: Argon2idV13,
 	}
 }
 
@@ -64,6 +74,11 @@ func DeriveKEK(passphrase, salt []byte, p KDFParams) ([]byte, error) {
 	}
 	if p.Threads == 0 {
 		return nil, errors.New("Threads must be > 0")
+	}
+	// Version=0 covers rows persisted before the field existed; we
+	// always produced Argon2id v1.3 so this is safe.
+	if p.Version != 0 && p.Version != Argon2idV13 {
+		return nil, fmt.Errorf("unsupported Argon2id version 0x%x; only 0x%x is supported", p.Version, Argon2idV13)
 	}
 	return argon2.IDKey(passphrase, salt, p.Time, p.Memory, p.Threads, p.KeyLen), nil
 }
