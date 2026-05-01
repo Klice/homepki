@@ -57,3 +57,21 @@ func TestSettings_NilValueRoundTrip(t *testing.T) {
 	require.NoError(t, err, "GetSetting after nil set")
 	assert.Empty(t, got)
 }
+
+func TestSetSettingIfMissing_WritesOnceThenIsNoop(t *testing.T) {
+	db := openTestDB(t)
+	require.NoError(t, Migrate(db))
+
+	wrote, err := SetSettingIfMissing(db, "snap", []byte("first"))
+	require.NoError(t, err)
+	assert.True(t, wrote, "first call must write")
+
+	wrote, err = SetSettingIfMissing(db, "snap", []byte("second"))
+	require.NoError(t, err)
+	assert.False(t, wrote, "second call must NOT overwrite — that's the point of the snapshot")
+
+	got, err := GetSetting(db, "snap")
+	require.NoError(t, err)
+	assert.Equal(t, "first", string(got),
+		"the original snapshot value must survive — drift detection depends on it")
+}

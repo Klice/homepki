@@ -22,6 +22,25 @@ func (q *Queries) GetSetting(ctx context.Context, key string) ([]byte, error) {
 	return value, err
 }
 
+const insertSettingIfMissing = `-- name: InsertSettingIfMissing :execrows
+INSERT INTO settings (key, value, updated_at)
+VALUES (?, ?, datetime('now'))
+ON CONFLICT(key) DO NOTHING
+`
+
+type InsertSettingIfMissingParams struct {
+	Key   string
+	Value []byte
+}
+
+func (q *Queries) InsertSettingIfMissing(ctx context.Context, arg InsertSettingIfMissingParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertSettingIfMissing, arg.Key, arg.Value)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const upsertSetting = `-- name: UpsertSetting :exec
 INSERT INTO settings (key, value, updated_at)
 VALUES (?, ?, datetime('now'))
