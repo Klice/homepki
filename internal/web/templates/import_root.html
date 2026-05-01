@@ -24,9 +24,15 @@
     </small>
   </p>
 
+  {{template "form_fragment" .}}
+</article>
+{{end}}
+
+{{define "form_fragment"}}
+<div id="issue-form" hx-target="this" hx-swap="outerHTML">
   {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
 
-  <form method="post" action="/certs/import/root">
+  <form method="post" action="/certs/import/root" hx-post="/certs/import/root">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <input type="hidden" name="form_token" value="{{.FormToken}}">
 
@@ -53,5 +59,5 @@
 
     <button type="submit" style="margin-top: 0.5rem;">Import root</button>
   </form>
-</article>
+</div>
 {{end}}

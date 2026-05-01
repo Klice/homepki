@@ -19,7 +19,12 @@
 {{end}}
 
 {{define "content"}}
-<form method="get" action="/" class="toolbar">
+<form method="get" action="/" class="toolbar"
+      hx-get="/"
+      hx-target="#index-fragment"
+      hx-swap="innerHTML"
+      hx-push-url="true"
+      hx-trigger="change, keyup changed delay:300ms from:input[type=search], submit">
   <input type="search" name="q" value="{{.Q}}"
          placeholder="Filter by CN, SAN, serial, fingerprint…" autocomplete="off">
   <select name="status">
@@ -34,6 +39,12 @@
   {{end}}
 </form>
 
+<div id="index-fragment">
+{{template "index_fragment" .}}
+</div>
+{{end}}
+
+{{define "index_fragment"}}
 <div class="section-head">
   <h2>
     Authorities

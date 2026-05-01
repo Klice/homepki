@@ -184,6 +184,13 @@
     </form>
   </details>
 
+  {{template "deploy_targets_fragment" .}}
+  {{end}}
+</article>
+{{end}}
+
+{{define "deploy_targets_fragment"}}
+<section id="deploy-targets" hx-target="this" hx-swap="outerHTML">
   <h3 style="font-size: 0.95rem; font-weight: 500;">Deploy targets</h3>
   {{if .DeployTargets}}
   <table>
@@ -206,12 +213,17 @@
         <td><span class="pill {{.StatusPillClass}}">{{.EffectiveStatus}}</span></td>
         <td>{{if .LastDeployedDisplay}}<small>{{.LastDeployedDisplay}}</small>{{else}}<small>—</small>{{end}}</td>
         <td style="text-align: right; white-space: nowrap;">
-          <form method="post" action="/certs/{{$.View.ID}}/deploy/{{.ID}}/run" style="display: inline; margin: 0;">
+          <form method="post" action="/certs/{{$.View.ID}}/deploy/{{.ID}}/run"
+                hx-post="/certs/{{$.View.ID}}/deploy/{{.ID}}/run"
+                style="display: inline; margin: 0;">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <button type="submit" class="secondary outline" style="padding: 0.2rem 0.5rem;">Run</button>
           </form>
           <a href="/certs/{{$.View.ID}}/deploy/{{.ID}}/edit" role="button" class="secondary outline" style="padding: 0.2rem 0.5rem;">Edit</a>
-          <form method="post" action="/certs/{{$.View.ID}}/deploy/{{.ID}}/delete" style="display: inline; margin: 0;" onsubmit="return confirm('Delete deploy target {{.Name}}?');">
+          <form method="post" action="/certs/{{$.View.ID}}/deploy/{{.ID}}/delete"
+                hx-post="/certs/{{$.View.ID}}/deploy/{{.ID}}/delete"
+                hx-confirm="Delete deploy target {{.Name}}?"
+                style="display: inline; margin: 0;" onsubmit="return confirm('Delete deploy target {{.Name}}?');">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <button type="submit" class="contrast outline" style="padding: 0.2rem 0.5rem;">Delete</button>
           </form>
@@ -225,7 +237,9 @@
   </table>
   <p style="margin-top: 0.5rem;">
     <a href="/certs/{{.View.ID}}/deploy/new" role="button" class="secondary">Add deploy target</a>
-    <form method="post" action="/certs/{{.View.ID}}/deploy" style="display: inline; margin-left: 0.5rem;">
+    <form method="post" action="/certs/{{.View.ID}}/deploy"
+          hx-post="/certs/{{.View.ID}}/deploy"
+          style="display: inline; margin-left: 0.5rem;">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <button type="submit" class="secondary outline">Run all</button>
     </form>
@@ -237,6 +251,5 @@
     to disk somewhere.
   </p>
   {{end}}
-  {{end}}
-</article>
+</section>
 {{end}}

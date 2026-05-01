@@ -14,9 +14,15 @@
   <header><h2 style="margin-bottom: 0.25rem;">{{.PageHeading}}</h2></header>
   <p><small>Roots are self-signed and have no CRL distribution point. They typically live for 10+ years.</small></p>
 
+  {{template "form_fragment" .}}
+</article>
+{{end}}
+
+{{define "form_fragment"}}
+<div id="issue-form" hx-target="this" hx-swap="outerHTML">
   {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
 
-  <form method="post" action="{{.FormAction}}">
+  <form method="post" action="{{.FormAction}}" hx-post="{{.FormAction}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <input type="hidden" name="form_token" value="{{.FormToken}}">
 
@@ -71,5 +77,5 @@
 
     <button type="submit" style="margin-top: 0.5rem;">Issue root CA</button>
   </form>
-</article>
+</div>
 {{end}}

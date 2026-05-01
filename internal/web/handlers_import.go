@@ -68,7 +68,7 @@ func (s *Server) handleImportRootPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if state.Replay {
-		http.Redirect(w, r, state.ResultURL, http.StatusSeeOther)
+		hxRedirect(w, r, state.ResultURL)
 		return
 	}
 
@@ -110,18 +110,24 @@ func (s *Server) handleImportRootPost(w http.ResponseWriter, r *http.Request) {
 		internalServerError(w, "import-root-post: persist", err)
 		return
 	}
-	http.Redirect(w, r, "/certs/"+id, http.StatusSeeOther)
+	hxRedirect(w, r, "/certs/"+id, EventCertsChanged)
 }
 
 // renderImportError re-renders the form with a 400 + the operator's
-// pasted PEM preserved.
+// pasted PEM preserved. htmx callers get just the form fragment back
+// per API.md §10.
 func (s *Server) renderImportError(w http.ResponseWriter, r *http.Request, formToken, certPEM, keyPEM, msg string) {
-	w.WriteHeader(http.StatusBadRequest)
-	s.render(w, "import_root", importViewData{
+	view := importViewData{
 		CSRFToken: CSRFToken(r),
 		FormToken: formToken,
 		Error:     msg,
 		CertPEM:   certPEM,
 		KeyPEM:    keyPEM,
-	})
+	}
+	w.WriteHeader(http.StatusBadRequest)
+	if IsHXRequest(r) {
+		s.renderFragment(w, "import_root", "form_fragment", view)
+		return
+	}
+	s.render(w, "import_root", view)
 }

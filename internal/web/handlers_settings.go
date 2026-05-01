@@ -65,7 +65,7 @@ func (s *Server) handleSettingsPassphrasePost(w http.ResponseWriter, r *http.Req
 		// Per API.md §4.4: replays return 303 to /settings without
 		// re-verifying current (which would fail because the passphrase
 		// has already changed).
-		http.Redirect(w, r, state.ResultURL, http.StatusSeeOther)
+		hxRedirect(w, r, state.ResultURL)
 		return
 	}
 
@@ -188,7 +188,7 @@ func (s *Server) handleSettingsPassphrasePost(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	http.Redirect(w, r, resultURL, http.StatusSeeOther)
+	hxRedirect(w, r, resultURL)
 }
 
 func (s *Server) renderSettingsError(w http.ResponseWriter, r *http.Request, formToken, msg string) {

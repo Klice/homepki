@@ -108,7 +108,7 @@ func (s *Server) handleIssueRootPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if state.Replay {
-		http.Redirect(w, r, state.ResultURL, http.StatusSeeOther)
+		hxRedirect(w, r, state.ResultURL)
 		return
 	}
 
@@ -133,7 +133,7 @@ func (s *Server) handleIssueRootPost(w http.ResponseWriter, r *http.Request) {
 		internalServerError(w, "issue-root-post: persist", err)
 		return
 	}
-	http.Redirect(w, r, "/certs/"+id, http.StatusSeeOther)
+	hxRedirect(w, r, "/certs/"+id, EventCertsChanged)
 }
 
 // ============== intermediate ==============
@@ -184,7 +184,7 @@ func (s *Server) handleIssueIntermediatePost(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if state.Replay {
-		http.Redirect(w, r, state.ResultURL, http.StatusSeeOther)
+		hxRedirect(w, r, state.ResultURL)
 		return
 	}
 
@@ -230,7 +230,7 @@ func (s *Server) handleIssueIntermediatePost(w http.ResponseWriter, r *http.Requ
 		internalServerError(w, "issue-int-post: persist", err)
 		return
 	}
-	http.Redirect(w, r, "/certs/"+id, http.StatusSeeOther)
+	hxRedirect(w, r, "/certs/"+id, EventCertsChanged)
 }
 
 // ============== leaf ==============
@@ -281,7 +281,7 @@ func (s *Server) handleIssueLeafPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if state.Replay {
-		http.Redirect(w, r, state.ResultURL, http.StatusSeeOther)
+		hxRedirect(w, r, state.ResultURL)
 		return
 	}
 
@@ -335,7 +335,7 @@ func (s *Server) handleIssueLeafPost(w http.ResponseWriter, r *http.Request) {
 		internalServerError(w, "issue-leaf-post: persist", err)
 		return
 	}
-	http.Redirect(w, r, "/certs/"+id, http.StatusSeeOther)
+	hxRedirect(w, r, "/certs/"+id, EventCertsChanged)
 }
 
 // ============== shared helpers ==============
@@ -445,11 +445,19 @@ func (s *Server) parentChoicesForLeaf() ([]parentChoice, error) {
 // renderIssueError re-renders the named issue template with the form data
 // preserved (so the operator doesn't have to re-fill everything) and an
 // error message. Sets HTTP 400.
+//
+// Per API.md §10: htmx callers get just the form fragment back so the
+// page surrounding the form (header, intro paragraph) doesn't reflow;
+// non-htmx callers get a full page render as before.
 func (s *Server) renderIssueError(w http.ResponseWriter, r *http.Request, name string, form issueViewData, formToken, msg string, choices []parentChoice) {
 	form.CSRFToken = CSRFToken(r)
 	form.FormToken = formToken
 	form.Error = msg
 	form.ParentChoices = choices
 	w.WriteHeader(http.StatusBadRequest)
+	if IsHXRequest(r) {
+		s.renderFragment(w, name, "form_fragment", form)
+		return
+	}
 	s.render(w, name, form)
 }

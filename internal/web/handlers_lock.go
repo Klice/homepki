@@ -8,5 +8,5 @@ import "net/http"
 func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
 	s.keystore.Lock()
 	http.SetCookie(w, ClearSessionCookie())
-	http.Redirect(w, r, "/unlock", http.StatusSeeOther)
+	hxRedirect(w, r, "/unlock")
 }

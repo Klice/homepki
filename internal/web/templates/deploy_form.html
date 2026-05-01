@@ -14,9 +14,15 @@
   <header><h2 style="margin-bottom: 0.25rem;">{{.PageHeading}}</h2></header>
   <p><small>For leaf cert <strong>{{.CertCN}}</strong>. Files are written via temp+rename so a concurrent reader never sees a half-written file.</small></p>
 
+  {{template "form_fragment" .}}
+</article>
+{{end}}
+
+{{define "form_fragment"}}
+<div id="deploy-form" hx-target="this" hx-swap="outerHTML">
   {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
 
-  <form method="post" action="{{.FormAction}}">
+  <form method="post" action="{{.FormAction}}" hx-post="{{.FormAction}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <input type="hidden" name="form_token" value="{{.FormToken}}">
 
@@ -67,5 +73,5 @@
 
     <button type="submit" style="margin-top: 0.5rem;">Save deploy target</button>
   </form>
-</article>
+</div>
 {{end}}

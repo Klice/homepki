@@ -14,12 +14,18 @@
   <header><h2 style="margin-bottom: 0.25rem;">{{.PageHeading}}</h2></header>
   <p><small>Intermediates are signed by a root and host a CRL distribution point. They typically live for ~5 years.</small></p>
 
+  {{template "form_fragment" .}}
+</article>
+{{end}}
+
+{{define "form_fragment"}}
+<div id="issue-form" hx-target="this" hx-swap="outerHTML">
   {{if .Error}}<p role="alert" style="color: var(--pico-color-red-550);">{{.Error}}</p>{{end}}
 
   {{if not .ParentChoices}}
     <p><strong>No root CAs available.</strong> <a href="/certs/new/root">Issue one first.</a></p>
   {{else}}
-  <form method="post" action="{{.FormAction}}">
+  <form method="post" action="{{.FormAction}}" hx-post="{{.FormAction}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <input type="hidden" name="form_token" value="{{.FormToken}}">
 
@@ -85,5 +91,5 @@
     <button type="submit" style="margin-top: 0.5rem;">Issue intermediate CA</button>
   </form>
   {{end}}
-</article>
+</div>
 {{end}}
