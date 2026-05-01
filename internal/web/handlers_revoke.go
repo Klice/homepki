@@ -35,7 +35,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 
 	// Ensure-state: already revoked → 303 to detail, no error.
 	if cert.Status == "revoked" {
-		http.Redirect(w, r, detailURL, http.StatusSeeOther)
+		hxRedirect(w, r, detailURL)
 		return
 	}
 
@@ -58,5 +58,5 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = transitioned // currently same outcome either way; reserved for future logging
-	http.Redirect(w, r, detailURL, http.StatusSeeOther)
+	hxRedirect(w, r, detailURL, EventCertsChanged)
 }

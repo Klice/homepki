@@ -90,7 +90,7 @@ func (s *Server) handleRotatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if state.Replay {
-		http.Redirect(w, r, state.ResultURL, http.StatusSeeOther)
+		hxRedirect(w, r, state.ResultURL)
 		return
 	}
 
@@ -194,7 +194,7 @@ func (s *Server) handleRotatePost(w http.ResponseWriter, r *http.Request) {
 	if newCert, err := store.GetCert(s.db, newID); err == nil {
 		s.runAutoOnRotateTargets(r, newCert)
 	}
-	http.Redirect(w, r, "/certs/"+newID, http.StatusSeeOther)
+	hxRedirect(w, r, "/certs/"+newID, EventCertsChanged)
 }
 
 // buildRotateView pre-fills an issueViewData from an existing cert, ready
@@ -245,6 +245,10 @@ func (s *Server) renderRotateError(w http.ResponseWriter, r *http.Request, cert 
 		}
 	}
 	w.WriteHeader(http.StatusBadRequest)
+	if IsHXRequest(r) {
+		s.renderFragment(w, templateForType(cert.Type), "form_fragment", form)
+		return
+	}
 	s.render(w, templateForType(cert.Type), form)
 }
 

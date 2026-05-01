@@ -68,7 +68,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	status := normaliseStatusFilter(r.URL.Query().Get("status"))
 
-	s.render(w, "index", indexViewData{
+	data := indexViewData{
 		CSRFToken:        CSRFToken(r),
 		Authorities:      filterCerts(authorities, q, status),
 		Leaves:           filterCerts(leafViews, q, status),
@@ -78,7 +78,15 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		StatusOptions:    statusFilterOptions,
 		TotalAuthorities: len(authorities),
 		TotalLeaves:      len(leafViews),
-	})
+	}
+
+	// Per API.md §10: htmx requests get the swappable region back; the
+	// rest of the page (chrome, scripts) stays put. Same URL serves both.
+	if IsHXRequest(r) {
+		s.renderFragment(w, "index", "index_fragment", data)
+		return
+	}
+	s.render(w, "index", data)
 }
 
 // normaliseStatusFilter accepts the closed set from API.md §5.1 and

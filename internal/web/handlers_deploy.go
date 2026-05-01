@@ -90,7 +90,7 @@ func (s *Server) handleDeployNewPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if state.Replay {
-		http.Redirect(w, r, state.ResultURL, http.StatusSeeOther)
+		hxRedirect(w, r, state.ResultURL)
 		return
 	}
 
@@ -116,7 +116,7 @@ func (s *Server) handleDeployNewPost(w http.ResponseWriter, r *http.Request) {
 			"/certs/"+cert.ID+"/deploy/new", "New deploy target")
 		return
 	}
-	http.Redirect(w, r, resultURL, http.StatusSeeOther)
+	hxRedirect(w, r, resultURL)
 }
 
 // ============== edit ==============
@@ -182,7 +182,7 @@ func (s *Server) handleDeployEditPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if state.Replay {
-		http.Redirect(w, r, state.ResultURL, http.StatusSeeOther)
+		hxRedirect(w, r, state.ResultURL)
 		return
 	}
 
@@ -211,7 +211,7 @@ func (s *Server) handleDeployEditPost(w http.ResponseWriter, r *http.Request) {
 			"Edit deploy target: "+existing.Name)
 		return
 	}
-	http.Redirect(w, r, resultURL, http.StatusSeeOther)
+	hxRedirect(w, r, resultURL)
 }
 
 // ============== delete ==============
@@ -228,15 +228,21 @@ func (s *Server) handleDeployDelete(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if _, err := store.GetCert(s.db, id); errors.Is(err, store.ErrCertNotFound) {
+	cert, err := store.GetCert(s.db, id)
+	if errors.Is(err, store.ErrCertNotFound) {
 		http.NotFound(w, r)
 		return
-	} else if err != nil {
+	}
+	if err != nil {
 		internalServerError(w, "deploy-delete: GetCert", err)
 		return
 	}
 	if err := store.DeleteDeployTarget(s.db, tid, id); err != nil {
 		internalServerError(w, "deploy-delete: DeleteDeployTarget", err)
+		return
+	}
+	if IsHXRequest(r) {
+		s.renderDeployTargetsFragment(w, r, cert)
 		return
 	}
 	http.Redirect(w, r, "/certs/"+id, http.StatusSeeOther)
@@ -260,6 +266,11 @@ func (s *Server) handleDeployRunOne(w http.ResponseWriter, r *http.Request) {
 	}
 	defer crypto.Zero(bytes.Key)
 	s.runAndRecord(r.Context(), cert, []*store.DeployTarget{target}, bytes)
+	if IsHXRequest(r) {
+		SetHXTrigger(w, EventDeployRan)
+		s.renderDeployTargetsFragment(w, r, cert)
+		return
+	}
 	http.Redirect(w, r, "/certs/"+cert.ID, http.StatusSeeOther)
 }
 
@@ -291,7 +302,7 @@ func (s *Server) handleDeployRunAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(targets) == 0 {
-		http.Redirect(w, r, "/certs/"+cert.ID, http.StatusSeeOther)
+		hxRedirect(w, r, "/certs/"+cert.ID)
 		return
 	}
 	bytes, err := s.buildDeployBytes(cert)
@@ -301,7 +312,37 @@ func (s *Server) handleDeployRunAll(w http.ResponseWriter, r *http.Request) {
 	}
 	defer crypto.Zero(bytes.Key)
 	s.runAndRecord(r.Context(), cert, targets, bytes)
+	if IsHXRequest(r) {
+		SetHXTrigger(w, EventDeployRan)
+		s.renderDeployTargetsFragment(w, r, cert)
+		return
+	}
 	http.Redirect(w, r, "/certs/"+cert.ID, http.StatusSeeOther)
+}
+
+// renderDeployTargetsFragment re-runs the deploy-targets section of the
+// cert detail page after a mutation (run, runAll, delete) so htmx swaps
+// the section in place. The data shape exactly matches what
+// handleCertDetail feeds to cert_detail's `deploy_targets_fragment`
+// block — fewer fields than the full page, but enough for the fragment
+// to render.
+func (s *Server) renderDeployTargetsFragment(w http.ResponseWriter, r *http.Request, cert *store.Cert) {
+	targets, err := store.ListDeployTargets(s.db, cert.ID)
+	if err != nil {
+		internalServerError(w, "deploy-fragment: ListDeployTargets", err)
+		return
+	}
+	chain, err := store.GetChain(s.db, cert.ID)
+	if err != nil {
+		internalServerError(w, "deploy-fragment: GetChain", err)
+		return
+	}
+	view := newCertView(cert, buildCNLookup(chain), time.Now())
+	s.renderFragment(w, "cert_detail", "deploy_targets_fragment", certDetailViewData{
+		CSRFToken:     CSRFToken(r),
+		View:          view,
+		DeployTargets: newDeployTargetViews(targets, cert.SerialNumber),
+	})
 }
 
 // ============== auto-on-rotate hook ==============
@@ -517,5 +558,9 @@ func (s *Server) renderDeployError(w http.ResponseWriter, r *http.Request, form 
 		form.PageTitle = heading
 	}
 	w.WriteHeader(http.StatusBadRequest)
+	if IsHXRequest(r) {
+		s.renderFragment(w, "deploy_form", "form_fragment", form)
+		return
+	}
 	s.render(w, "deploy_form", form)
 }
